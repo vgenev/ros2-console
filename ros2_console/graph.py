@@ -165,13 +165,38 @@ rclpy.shutdown()
 """
 
 GRAPH_SCRIPT = r"""
+# "The shell ran" is not "ROS answered". A reachable host with an unsourced or
+# missing ROS environment runs this script perfectly and returns nothing, which a
+# parser cannot tell apart from a healthy robot with no nodes. Discovery therefore
+# has to announce itself: no marker means failure, with the reason attached.
+REQUESTED_DISTRO=__REQUESTED_DISTRO__
 echo "@@DISTRO ${ROS_DISTRO:-unknown}"
 echo "@@RMW ${RMW_IMPLEMENTATION:-default}"
+if ! command -v ros2 >/dev/null 2>&1; then
+  echo "@@DISCOVERY FAIL ros2 is not on PATH on this host: the ROS 2 environment for distro '$REQUESTED_DISTRO' is not installed or could not be sourced (ROS_DISTRO is '${ROS_DISTRO:-unset}')"
+  echo "@@END"
+  exit 3
+fi
 echo "@@NODES"
-ros2 node list 2>&1 | head -300
+NODES_OUT=$(ros2 node list 2>&1)
+NODES_RC=$?
+printf '%s\n' "$NODES_OUT" | head -300
+if [ "$NODES_RC" -ne 0 ]; then
+  NODES_ERR=$(printf '%s\n' "$NODES_OUT" | head -1)
+  echo "@@DISCOVERY FAIL ros2 node list exited $NODES_RC on distro '${ROS_DISTRO:-unknown}': ${NODES_ERR:-no error text}"
+  echo "@@END"
+  exit 3
+fi
 echo "@@TOPICS"
-TOPICS_OUT=$(ros2 topic list -t 2>&1 | head -500)
-printf '%s\n' "$TOPICS_OUT"
+TOPICS_OUT=$(ros2 topic list -t 2>&1)
+TOPICS_RC=$?
+printf '%s\n' "$TOPICS_OUT" | head -500
+if [ "$TOPICS_RC" -ne 0 ]; then
+  TOPICS_ERR=$(printf '%s\n' "$TOPICS_OUT" | head -1)
+  echo "@@DISCOVERY FAIL ros2 topic list exited $TOPICS_RC on distro '${ROS_DISTRO:-unknown}': ${TOPICS_ERR:-no error text}"
+  echo "@@END"
+  exit 3
+fi
 echo "@@DETAIL"
 # Publisher/subscriber counts. The `ros2 topic info` CLI path is serialized by
 # the ros2 daemon (~1.9 s per topic measured on a Qualcomm aarch64 board), so ten
@@ -197,6 +222,7 @@ else
     echo "@@T|$t|${pub:-?}|${sub:-?}|$typ"
   done
 fi
+echo "@@DISCOVERY OK"
 echo "@@END"
 """.replace("__INTROSPECT__", GRAPH_INTROSPECT)
 
@@ -205,7 +231,7 @@ echo "@@END"
 # look "up" in `ros2 node list` — that is the whole reason this check exists.
 
 HEALTH_TEXT = {
-    "live": "publishers and subscribers connected",
+    "live": "publishers and subscribers connected and traffic measured above 0 Hz",
     "dead_input": "has subscribers but nobody publishes — subscribers wait forever",
     "dead_output": "has publishers but nobody subscribes — output is being discarded",
     "unmeasured": "publisher/subscriber counts unavailable (permissions or a slow host)",
@@ -214,6 +240,18 @@ HEALTH_TEXT = {
     "silent": "endpoints are connected but no message arrived during the sample window — "
               "wiring is fine, traffic is not",
 }
+
+# `live` is a claim about data flowing, so it needs a measurement, not just wiring.
+# Two ways to have no measurement: the counts themselves are missing, or the
+# endpoints are there but no rate sample came back for the topic.
+UNMEASURED_RATE_TEXT = (
+    "endpoints are connected but the rate was not measured — no traffic sample was "
+    "returned for this topic, so this is not evidence that data is flowing"
+)
+UNMEASURED_ENDPOINTS_TEXT = (
+    "no publisher and no subscriber is connected to this topic and nothing was "
+    "measured — it is not live"
+)
 
 # Durability that makes "nobody subscribed right now" a non-event: the publisher
 # holds the last sample and delivers it when a consumer finally connects. Calling
@@ -238,6 +276,28 @@ def _split_sections(text: str) -> dict[str, list[str]]:
             continue
         sections[current].append(line)
     return sections
+
+
+DISCOVERY_OK = "@@DISCOVERY OK"
+DISCOVERY_FAIL = "@@DISCOVERY FAIL"
+
+
+def _discovery(text: str) -> tuple[bool, str | None]:
+    """Did ROS 2 answer, or did only the remote shell run?
+
+    A shell that runs and a ROS graph that answers produce the same empty stdout
+    when the environment is not sourced, so the script announces discovery and
+    this is the only thing that can tell the two apart.
+    """
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if stripped == DISCOVERY_OK:
+            return True, None
+        if stripped.startswith(DISCOVERY_FAIL):
+            reason = stripped[len(DISCOVERY_FAIL):].strip()
+            return False, reason or "ROS 2 did not answer on this host"
+    return False, ("no discovery marker in the output: the remote shell ran but ROS 2 "
+                   "never answered — the ROS environment is not sourced there")
 
 
 def parse_graph(text: str, *, include_system: bool = False) -> dict:
@@ -306,7 +366,10 @@ def parse_graph(text: str, *, include_system: bool = False) -> dict:
     withheld = [t for t in broken if t["name"] in SYSTEM_TOPICS]
     orphans = broken if include_system else [t for t in broken if t["name"] not in SYSTEM_TOPICS]
     latched = [t for t in ordered if t["health"] == "state"]
+    answered, discovery_error = _discovery(text)
     return {
+        "ros_answered": answered,
+        "discovery_error": discovery_error,
         "ros_distro": distro,
         "rmw": rmw,
         "nodes": nodes,
@@ -335,22 +398,48 @@ def _classify(entry: dict) -> tuple[str, str]:
     pubs, subs = entry.get("publishers"), entry.get("subscribers")
     if pubs is None or subs is None:
         return "unmeasured", HEALTH_TEXT["unmeasured"]
+    if pubs == 0 and subs == 0:
+        # Nothing is connected to it: no traffic sample can exist, so silence here
+        # is an absence of measurement, not a measurement of silence.
+        return "unmeasured", UNMEASURED_ENDPOINTS_TEXT
     if subs > 0 and pubs == 0:
         return "dead_input", HEALTH_TEXT["dead_input"]
     if pubs > 0 and subs == 0:
         if str(entry.get("durability") or "").upper() in LATCHED_DURABILITY:
             return "state", HEALTH_TEXT["state"]
         return "dead_output", HEALTH_TEXT["dead_output"]
-    if entry.get("rate_hz") == 0:
+    rate = entry.get("rate_hz")
+    if rate is None:
+        # Both endpoints present but the payload carried no @@R sample (the daemon
+        # fallback never measures). Wiring is not traffic: do not call this live.
+        return "unmeasured", UNMEASURED_RATE_TEXT
+    if rate <= 0:
         return "silent", HEALTH_TEXT["silent"]
     return "live", HEALTH_TEXT["live"]
 
 
+def _graph_script(target: Target) -> str:
+    return GRAPH_SCRIPT.replace("__REQUESTED_DISTRO__", shlex.quote(target.distro or "unknown"))
+
+
 def graph(target: Target, *, include_system: bool = False) -> tuple[dict | None, Result]:
-    result = run(target, GRAPH_SCRIPT, timeout=max(target.timeout, 20), label="graph")
-    if not result.ok and "@@END" not in result.stdout:
+    """Read the graph, refusing to call an unanswered discovery an empty robot."""
+    result = run(target, _graph_script(target), timeout=max(target.timeout, 20), label="graph")
+    text = result.stdout or ""
+    answered, reason = _discovery(text)
+    if not answered or "@@END" not in text:
+        if answered:
+            reason = (reason or "the graph command did not finish") + \
+                     " (output ended before @@END — the run was cut short)"
+        elif not ("@@DISCOVERY FAIL" in text or "@@DISTRO" in text):
+            # Not even the script's own preamble came back: ssh refused, the key
+            # failed, or the run timed out. The transport error is the story.
+            reason = result.error()
+        # `result.ok` can be true here: an unsourced shell exits cleanly. The
+        # marker is the evidence, and there is none.
+        result.meta["discovery_error"] = reason
         return None, result
-    return parse_graph(result.stdout, include_system=include_system), result
+    return parse_graph(text, include_system=include_system), result
 
 
 # ---------------------------------------------------------------------------- rate
@@ -502,6 +591,25 @@ if not msg_type.endswith(("/Image", "/CompressedImage")):
     sys.exit(3)
 is_raw = msg_type.endswith("/Image")
 
+if is_raw:
+    # The decode runs on the robot. When its python lacks numpy or PIL the
+    # subscription callback dies inside spin and the run looks exactly like
+    # "nothing was published"; report the missing module instead.
+    missing = []
+    try:
+        import numpy  # noqa: F401
+    except Exception:
+        missing.append("numpy")
+    try:
+        from PIL import Image  # noqa: F401
+    except Exception:
+        missing.append("PIL/Pillow")
+    if missing:
+        print("@@ERR cannot decode raw %s on %s: %s missing on the robot. Raw Image is "
+              "converted there, so install it or capture a CompressedImage topic"
+              % (msg_type, topic, " and ".join(missing)))
+        sys.exit(3)
+
 
 def handle_compressed(msg):
     box["data"] = bytes(msg.data)
@@ -577,8 +685,9 @@ def snapshot(target: Target, topic: str, seconds: int = 8) -> tuple[dict, Result
     if "@@ERR" in stdout:
         message = stdout.split("@@ERR", 1)[1].strip().splitlines()[0]
         return {"topic": topic, "ok": False, "error": message,
-                "hint": "check the topic exists on this graph and is publishing; raw Image is "
-                        "decoded on the robot when numpy and PIL are present"}, result
+                "hint": "check the topic exists on this graph and is publishing; a raw Image "
+                        "is decoded on the robot and needs numpy and PIL there — if the error "
+                        "names one, install it or capture a CompressedImage topic"}, result
     if "@@B64 " not in stdout:
         return {"topic": topic, "ok": False,
                 "error": (result.error() if not result.ok else "no image payload returned")}, result

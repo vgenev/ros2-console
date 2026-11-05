@@ -12,4 +12,6 @@ Subscription count: 1
 @@DETAIL
 @@T|/chatter|1|1|std_msgs/msg/String
 @@T|/spare/status|?|?|std_msgs/msg/String
+@@R|/chatter|10.000
+@@DISCOVERY OK
 @@END

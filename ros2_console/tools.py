@@ -62,10 +62,18 @@ def _graph(args, ctx=None):
     except ValueError as exc:
         return json.dumps({"ok": False, "error": str(exc)})
     if data is None:
-        return json.dumps({"ok": False, "target": target.label, "error": result.error(),
+        # The shell answered but ROS 2 did not: name that, instead of returning an
+        # empty-looking graph an agent would read as a healthy idle robot.
+        return json.dumps({"ok": False, "target": target.label, "mode": target.mode,
+                           "error_kind": "ros_not_answered",
+                           "error": result.meta.get("discovery_error") or result.error(),
                            "stdout_tail": (result.stdout or "")[-500:]})
-    data.update({"ok": True, "target": target.label, "mode": target.mode,
+    data.update({"target": target.label, "mode": target.mode,
                  "seconds": round(result.seconds, 2)})
+    # `graph()` refuses to return data without the discovery marker; parse_graph
+    # records the verdict, so keep the flag tied to that evidence instead of
+    # setting it unconditionally.
+    data["ok"] = data.get("ros_answered") is not False
     if not args.get("all_topics"):
         # The model needs the live map, not three hundred idle introspection topics.
         data["topics"] = [t for t in data["topics"] if t["health"] != "live" or t["publishers"]]
@@ -193,7 +201,9 @@ _TOOLS = [
                 "forever) and 'dead_output' (publishers but no subscriber, so results are "
                 "discarded). /rosout, /rosout_agg, /parameter_events, and /clock stay in the "
                 "topic list with their real health and are left out of orphans unless "
-                "include_system is true. Use it before guessing why a robot misbehaves."
+                "include_system is true. `ok` is true only when ROS 2 actually answered: an "
+                "unsourced or wrong environment returns ok=false with the reason in `error` "
+                "rather than an empty graph. Use it before guessing why a robot misbehaves."
             ),
             "parameters": {
                 "type": "object",

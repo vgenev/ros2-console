@@ -23,4 +23,7 @@
 @@T|/inspection/verdict|1|0|std_msgs/msg/String
 @@T|/parameter_events|7|0|rcl_interfaces/msg/ParameterEvent
 @@T|/rosout|7|0|rcl_interfaces/msg/Log
+@@R|/camera/image_raw/compressed|30.000
+@@R|/chatter|10.000
+@@DISCOVERY OK
 @@END

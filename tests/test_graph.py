@@ -24,7 +24,8 @@ CAPTURED_HEALTH = {
 }
 
 
-def _envelope(detail: str, topic_line: str) -> str:
+def _envelope(detail: str, topic_line: str, rate: str | None = None) -> str:
+    rate_line = f"@@R|/probe|{rate}\n" if rate else ""
     return (
         "@@DISTRO jazzy\n"
         "@@RMW default\n"
@@ -34,6 +35,8 @@ def _envelope(detail: str, topic_line: str) -> str:
         f"{topic_line}\n"
         "@@DETAIL\n"
         f"{detail}\n"
+        f"{rate_line}"
+        "@@DISCOVERY OK\n"
         "@@END\n"
     )
 
@@ -138,21 +141,30 @@ def test_unmeasured_topic_is_not_an_orphan():
 
 
 @pytest.mark.parametrize(
-    ("pubs", "subs", "expected", "rejected"),
+    ("pubs", "subs", "rate", "expected", "rejected"),
     [
-        ("0", "1", "dead_input", "dead_output"),
-        ("1", "0", "dead_output", "dead_input"),
-        ("2", "0", "dead_output", "dead_input"),
-        ("0", "3", "dead_input", "dead_output"),
-        ("?", "1", "unmeasured", "dead_input"),
-        ("1", "?", "unmeasured", "dead_output"),
-        ("1", "1", "live", "dead_output"),
+        ("0", "1", None, "dead_input", "dead_output"),
+        ("1", "0", None, "dead_output", "dead_input"),
+        ("2", "0", None, "dead_output", "dead_input"),
+        ("0", "3", None, "dead_input", "dead_output"),
+        ("?", "1", None, "unmeasured", "dead_input"),
+        ("1", "?", None, "unmeasured", "dead_output"),
+        # No endpoints: nothing can have been measured, so never "live".
+        ("0", "0", None, "unmeasured", "live"),
+        ("0", "0", "12.500", "unmeasured", "live"),
+        # Endpoints without a rate sample (daemon fallback) is not traffic.
+        ("1", "1", None, "unmeasured", "live"),
+        # A measured positive rate is what makes a topic live.
+        ("1", "1", "9.500", "live", "dead_output"),
+        # Connected, measured, nothing arriving: silent, not live.
+        ("1", "1", "0.000", "silent", "live"),
     ],
 )
-def test_inverse_health_is_rejected(pubs, subs, expected, rejected):
+def test_inverse_health_is_rejected(pubs, subs, rate, expected, rejected):
     text = _envelope(
         f"@@T|/probe|{pubs}|{subs}|std_msgs/msg/String",
         "/probe [std_msgs/msg/String]",
+        rate=rate,
     )
     parsed = parse_graph(text)
     entry = parsed["topics"][0]
@@ -179,6 +191,7 @@ EDGE_TEXT = """@@DISTRO jazzy
 @@E|/chatter|S|/listener|std_msgs/msg/String
 @@T|/quiet|1|0|std_msgs/msg/String
 @@E|/quiet|P|/talker|std_msgs/msg/String
+@@DISCOVERY OK
 @@END
 """
 
@@ -225,6 +238,7 @@ TRAFFIC_TEXT = """@@DISTRO jazzy
 @@R|/events|0.000
 @@E|/events|P|/cam|std_msgs/msg/String
 @@E|/events|S|/logger|std_msgs/msg/String
+@@DISCOVERY OK
 @@END
 """
 
@@ -242,3 +256,121 @@ def test_connected_but_silent_is_its_own_state():
     by_name = {t["name"]: t for t in parsed["topics"]}
     assert by_name["/events"]["health"] == "silent"
     assert parsed["counts"]["orphans"] == 0
+
+
+# --------------------------------------------------- P0-3/P0-4: measured claims
+
+
+def test_zero_publishers_and_zero_subscribers_is_never_live():
+    """Nothing is connected, so no traffic sample exists: not evidence of flow."""
+    text = _envelope("@@T|/idle|0|0|std_msgs/msg/String", "/idle [std_msgs/msg/String]",
+                     rate="12.500")
+    entry = parse_graph(text)["topics"][0]
+    assert (entry["publishers"], entry["subscribers"]) == (0, 0)
+    assert entry["health"] == "unmeasured"
+    assert "not live" in entry["health_text"]
+
+
+def test_a_publisher_without_a_rate_sample_is_unmeasured():
+    """The daemon fallback reports no @@R line; wiring alone is not traffic."""
+    text = _envelope("@@T|/probe|1|1|std_msgs/msg/String", "/probe [std_msgs/msg/String]")
+    entry = parse_graph(text)["topics"][0]
+    assert entry["health"] == "unmeasured"
+    assert "rate_hz" not in entry
+    assert "rate was not measured" in entry["health_text"]
+
+
+def test_graph_script_announces_discovery_and_checks_ros_is_installed():
+    from ros2_console.graph import GRAPH_SCRIPT
+
+    assert "@@DISCOVERY OK" in GRAPH_SCRIPT
+    assert "command -v ros2" in GRAPH_SCRIPT
+
+
+def test_parse_graph_records_whether_ros_answered():
+    ok = parse_graph(_envelope("@@T|/probe|1|1|std_msgs/msg/String",
+                               "/probe [std_msgs/msg/String]", rate="1.000"))
+    assert (ok["ros_answered"], ok["discovery_error"]) == (True, None)
+
+    bare = parse_graph("@@DISTRO unknown\n@@RMW default\n@@NODES\n@@TOPICS\n@@DETAIL\n@@END\n")
+    assert bare["ros_answered"] is False
+    assert "ROS environment is not sourced" in bare["discovery_error"]
+
+    failed = parse_graph(
+        "@@DISTRO unknown\n@@RMW default\n@@NODES\n@@TOPICS\n"
+        "@@DISCOVERY FAIL ros2 is not on PATH on this host\n@@END\n"
+    )
+    assert failed["ros_answered"] is False
+    assert "ros2 is not on PATH" in failed["discovery_error"]
+
+
+def _payload(stdout: str, ok: bool = True, exit_code: int = 0):
+    from ros2_console.transport import Result
+
+    return Result(ok=ok, stdout=stdout, exit_code=exit_code, target="local")
+
+
+BARE_RUN = "@@DISTRO unknown\n@@RMW default\n@@NODES\n@@TOPICS\n@@DETAIL\n@@END\n"
+
+
+def test_graph_call_refuses_a_run_without_a_discovery_marker(monkeypatch):
+    """A shell that ran is not a ROS 2 that answered — never an empty healthy graph."""
+    from ros2_console import graph as g
+    from ros2_console.transport import Target
+
+    monkeypatch.setattr(g, "run", lambda *a, **k: _payload(BARE_RUN))
+    data, result = g.graph(Target())
+    assert data is None
+    assert "ROS environment is not sourced" in result.meta["discovery_error"]
+
+
+def test_graph_tool_reports_ok_false_when_ros_never_answered(monkeypatch):
+    import json
+
+    from ros2_console import graph as g
+    from ros2_console.tools import _graph
+
+    monkeypatch.setattr(g, "run", lambda *a, **k: _payload(BARE_RUN))
+    payload = json.loads(_graph({"host": "robot"}))
+    assert payload["ok"] is False
+    assert payload["error_kind"] == "ros_not_answered"
+    assert "ROS environment is not sourced" in payload["error"]
+    assert "topics" not in payload
+
+
+def test_graph_tool_is_ok_only_when_ros_answered(monkeypatch):
+    import json
+
+    from ros2_console import graph as g
+    from ros2_console.tools import _graph
+
+    stdout = _envelope("@@T|/probe|1|1|std_msgs/msg/String",
+                       "/probe [std_msgs/msg/String]", rate="9.500")
+    monkeypatch.setattr(g, "run", lambda *a, **k: _payload(stdout))
+    payload = json.loads(_graph({"host": "robot"}))
+    assert payload["ok"] is True
+    assert payload["ros_answered"] is True
+    assert payload["topics"][0]["health"] == "live"
+
+
+def test_raw_image_without_a_decoder_says_so_instead_of_no_image(monkeypatch):
+    """numpy/PIL missing on the robot is a decoder problem, not a silent camera."""
+    from ros2_console import graph as g
+    from ros2_console.transport import Target
+
+    stdout = ("@@ERR cannot decode raw sensor_msgs/msg/Image on /cam/image_raw: numpy "
+              "missing on the robot. Raw Image is converted there, so install it or "
+              "capture a CompressedImage topic\n")
+    monkeypatch.setattr(g, "run", lambda *a, **k: _payload(stdout, ok=False, exit_code=3))
+    data, _ = g.snapshot(Target(), "/cam/image_raw")
+    assert data["ok"] is False
+    assert "numpy" in data["error"]
+    assert "missing on the robot" in data["error"]
+    assert "no Image within" not in data["error"]
+
+
+def test_raw_image_body_checks_the_decoder_before_subscribing():
+    from ros2_console.graph import SNAPSHOT_BODY
+
+    assert "cannot decode raw" in SNAPSHOT_BODY
+    assert 'missing.append("numpy")' in SNAPSHOT_BODY

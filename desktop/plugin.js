@@ -286,7 +286,7 @@ function Legend({ active, onSelect }) {
     ['state', 'state — latched, keeps last value for late subscribers'],
     ['dead_output', 'dead output — published, nobody subscribes'],
     ['dead_input', 'dead input — subscribed, nobody publishes'],
-    ['unmeasured', 'unmeasured — counts unavailable'],
+    ['unmeasured', 'unmeasured — no rate measured, not evidence of flow'],
   ]
   return jsxs('div', {
     style: {

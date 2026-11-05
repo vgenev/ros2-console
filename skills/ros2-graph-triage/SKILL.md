@@ -20,6 +20,11 @@ Reading them as "up or down" produces wrong conclusions:
 - `silent` — publisher and subscriber are connected but no message arrived inside the 2 s sample
   window. For an event-driven topic that is normal; confirm with `ros2_topic_rate` over a longer window
   before calling it broken.
+- `unmeasured` — no measurement exists: the counts are missing, both counts are 0 (nothing is
+  connected, so nothing was sampled), or the endpoints are connected but no rate sample came back
+  (the daemon fallback never measures a rate). Not evidence of health, and never `live`.
+- `live` — endpoints connected **and** a rate above 0 Hz measured in the sample window. If the rate
+  is missing, the answer is `unmeasured`, not `live`.
 - `dead_output` with `VOLATILE` durability — nobody is listening and nothing is retained. This is the
   one that means data is being discarded.
 
@@ -36,11 +41,16 @@ health flag per topic.
   healthy in `ros2 node list`**. This is the most expensive failure to notice by eye because
   every process is up.
 - `dead_output` — publishers, no subscriber. Messages are produced and discarded.
-- `unmeasured` — counts unavailable (permissions, a very slow host). Not evidence of health.
+- `unmeasured` — no measurement exists: counts unavailable (permissions, a very slow host), 0/0
+  endpoints, or no rate sample. Not evidence of health.
 
-If the whole graph is empty, stop triaging topics: you are either on the wrong host, in the
-wrong `ROS_DOMAIN_ID`, or discovery is blocked. Check `ros2_host_status` for a reachable host
-with zero nodes before you touch anything else.
+`ros2_graph` returns `ok: false` with `error_kind: ros_not_answered` when the host answers but ROS 2
+does not (wrong distro, environment not sourced, `ros2 node list` failing). That is a failure to
+read the graph, not an empty graph — fix the environment before triaging topics.
+
+If the graph *did* answer and is empty, stop triaging topics: you are either in the wrong
+`ROS_DOMAIN_ID` or discovery is blocked. Check `ros2_host_status` for a reachable host with zero
+nodes before you touch anything else.
 
 ## 2. Does it publish at all, and at what rate?
 
