@@ -1,7 +1,7 @@
 name: ros2-console
 repo: https://github.com/OWNER/ros2-console
-# Placeholder. Replace with the 40-hex commit after the first public push.
-sha: "0000000000000000000000000000000000000000"
+# SHA_PENDING until the first public push, then a 40-hex digest that is not all zeros.
+sha: SHA_PENDING
 description: Read a live ROS 2 graph over SSH. Report topic health, publish rate, one message, and a compressed camera frame.
 maintainer: vgenev
 tier: community
