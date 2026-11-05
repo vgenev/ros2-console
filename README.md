@@ -31,7 +31,7 @@ Defaults come from `plugin.yaml`.
 
 ## Pane
 
-Hermes Desktop opens a pane titled **ROS 2** on the right, 360 pixels wide. The header shows the target, the distro, and the time of the last refresh. **Refresh** loads the graph once. **Poll** repeats that load every 5 seconds, and it stays off until you turn it on. A banner shows the orphan count and names up to three topics whose health is `dead_input` or `dead_output`. When housekeeping topics were left out, a second line says they were not counted. The status bar shows the same orphan count. **Grab frame** loads the camera topic. That topic defaults to `/camera/image_raw/compressed`, and the pane remembers a change.
+Hermes Desktop opens a pane titled **ROS 2** on the right, 360 pixels wide. The header shows the target, the distro, and the time of the last refresh. The target field under the header sets the SSH target from inside the pane (type it, press **Set target** or Enter) and saves it as the plugin's `host` setting, so a freshly installed plugin needs no config editing. **Refresh** loads the graph once. **Poll** repeats that load every 5 seconds, and it stays off until you turn it on. A banner shows the orphan count and names up to three topics whose health is `dead_input` or `dead_output`. When housekeeping topics were left out, a second line says they were not counted. The status bar shows the same orphan count. **Grab frame** loads the camera topic. That topic defaults to `/camera/image_raw/compressed`, and the pane remembers a change.
 
 ## Safety
 
