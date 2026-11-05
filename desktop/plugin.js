@@ -3,7 +3,22 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 import { ROUTES_AREA, SIDEBAR_NAV_AREA } from '@hermes/plugin-sdk'
 
 const DEFAULT_TOPIC = '/camera/image_raw/compressed'
-const POLL_MS = 5000
+// A read costs 11-12s on the board, so polling has to be slower than a read;
+// anything faster only queues work and repaints.
+const POLL_MS = 15000
+
+// Animation cycles are quantised: a small rate change between polls would
+// otherwise produce a new dur value, restart the SMIL animation, and read as a
+// flicker on every refresh.
+const ANIM_BUCKETS = ['0.40s', '0.70s', '1.10s', '1.60s', '2.40s']
+
+function animBucket(rate) {
+  if (rate >= 20) return 0
+  if (rate >= 8) return 1
+  if (rate >= 3) return 2
+  if (rate >= 1) return 3
+  return 4
+}
 const HEALTH_COLOR = {
   live: '#3dd68c',
   dead_input: '#ff6b6b',
@@ -37,7 +52,12 @@ function clock() {
 }
 
 async function refresh(ctx) {
+  // A graph read takes 11-12s on real hardware. Polling faster than that stacks
+  // requests and repaints the page continuously, which reads as flicker.
+  if (refresh.busy) return
+  refresh.busy = true
   const previous = store.snap
+  store.set(Object.assign({}, previous, { loading: true }))
   try {
     const settings = await ctx.rest('/settings')
     const graph = await ctx.rest('/graph')
@@ -47,6 +67,7 @@ async function refresh(ctx) {
       graph: failed ? null : graph,
       error: failed ? graph.error || 'Graph request failed.' : '',
       at: clock(),
+      loading: false,
     })
   } catch (err) {
     store.set({
@@ -54,7 +75,10 @@ async function refresh(ctx) {
       graph: previous.graph,
       error: err && err.message ? err.message : String(err),
       at: clock(),
+      loading: false,
     })
+  } finally {
+    refresh.busy = false
   }
 }
 
@@ -205,7 +229,7 @@ function Topology({ graph }) {
     // topic's real message rate rises, and a quiet topic (0 msg/s in the sample
     // window) does not move at all even when both endpoints exist.
     const moves = rate > 0 && (healthOf === 'live' || healthOf === 'silent' || healthOf === 'state')
-    const dur = moves ? Math.max(0.35, Math.min(2.4, 1.6 / Math.max(rate, 0.4))) : null
+    const dur = moves ? ANIM_BUCKETS[animBucket(rate)] : null
     const d =
       'M ' + LANE_L + ' ' + y1 + ' C ' + (LANE_L + 110) + ' ' + y1 + ', ' +
       (LANE_R - 110) + ' ' + y2 + ', ' + LANE_R + ' ' + y2
@@ -221,7 +245,7 @@ function Topology({ graph }) {
             attributeName: 'stroke-dashoffset',
             from: '0',
             to: '-28',
-            dur: dur.toFixed(2) + 's',
+            dur: dur,
             repeatCount: 'indefinite',
           })
         : null,
@@ -376,7 +400,7 @@ function Pane({ ctx, bus }) {
     if (!polling) return undefined
     const stop = ctx.setInterval(() => {
       if (topic) grab()
-    }, 4000)
+    }, 8000)
     return () => stop()
   }, [polling, topic])
 
@@ -421,8 +445,18 @@ function Pane({ ctx, bus }) {
       if (!body || body.ok === false) {
         setFrame(null)
         setFrameError((body && body.error) || 'No frame.')
-      } else {
-        setFrame(body)
+      } else if (!frame || frame.data_url !== body.data_url) {
+        // Decode the new bitmap before swapping it in. Pointing <img> straight at a
+        // fresh data URL blanks the picture for a beat on every poll, which is the
+        // most visible part of the flicker.
+        if (body.data_url && typeof Image !== 'undefined') {
+          const preload = new Image()
+          preload.onload = () => setFrame(body)
+          preload.onerror = () => setFrame(body)
+          preload.src = body.data_url
+        } else {
+          setFrame(body)
+        }
       }
     } catch (err) {
       setFrame(null)
@@ -449,7 +483,11 @@ function Pane({ ctx, bus }) {
           jsx('strong', { children: targetLabel(snap.settings) }),
           jsx('span', {
             style: { color: 'var(--ui-text-tertiary)' },
-            children: snap.at ? 'updated ' + snap.at : 'not refreshed',
+            children: snap.loading
+              ? 'reading graph…'
+              : snap.at
+                ? 'updated ' + snap.at
+                : 'not refreshed',
           }),
         ],
       }),
@@ -492,7 +530,12 @@ function Pane({ ctx, bus }) {
       jsxs('div', {
         style: { display: 'flex', gap: '6px', marginBottom: '8px' },
         children: [
-          jsx('button', { type: 'button', onClick: () => bus.refresh(), children: 'Refresh' }),
+          jsx('button', {
+            type: 'button',
+            disabled: !!snap.loading,
+            onClick: () => bus.refresh(),
+            children: 'Refresh',
+          }),
           jsx('button', {
             type: 'button',
             onClick: () => {
