@@ -19,14 +19,34 @@ Same camera, ~13× the wire cost. On a wireless or metered edge link that is the
 between a working cell and a starved one — and a starved bus does not fail loudly, it makes
 every other topic's rate sag.
 
-## Reading a compressed topic
+## Reading an image topic
 
-`ros2_camera_snapshot` subscribes once to a `CompressedImage` topic and writes the payload to a
-JPEG on the machine running Hermes. It refuses `sensor_msgs/Image` on purpose: decoding raw
-pixels correctly needs the encoding, the step (row stride) and colour order, and a wrong guess
-produces a plausible-looking, wrong image — worse than an honest error.
+`ros2_camera_snapshot` subscribes once to an image topic, writes the frame into the plugin's
+frames directory on the machine running Hermes, and returns its `path`. It reads the topic's actual
+message type from the graph instead of guessing, because a raw `Image` and a `CompressedImage` need
+different handling:
 
-If the only topic is raw, republish it compressed on the robot, then snapshot the new topic:
+- **`CompressedImage`** — the payload is already JPEG or PNG and is written through unchanged.
+- **`Image`** (raw) — decoded **on the robot** with the message's own fields: `encoding`
+  (`rgb8`, `bgr8`, `rgba8`, `bgra8`, `mono8`), `step` as the row stride, and the matching colour
+  order, then encoded as JPEG q85. Nothing is guessed: an encoding outside that list, or a payload
+  shorter than `height × step`, is refused with an error that names the problem.
+
+The raw path needs `numpy` and Pillow importable by the robot's `python3`, since the decode runs
+where the pixels are. A missing module is reported as a missing module, not as an empty topic.
+The reply also carries `source` (for example `bgr8 640x480 Image`) and `stamp`, so you can see
+which shape you actually got and whether it is fresh.
+
+The path always ends `.jpg` regardless of what arrived, so trust the returned `format`: a PNG
+publisher gives you a `.jpg`-named file holding PNG bytes.
+
+Anything that is neither `Image` nor `CompressedImage` is refused by type name.
+
+## When raw is still worth republishing
+
+The snapshot tool reads raw, so republishing is no longer the way to get a frame. It is still the
+right fix for bandwidth: raw `Image` costs roughly 13× the bytes of the same view as JPEG (table
+above), and every subscriber downstream pays that. Republish once on the robot:
 
 ```
 ros2 run image_transport republish raw in:=/camera/image_raw \

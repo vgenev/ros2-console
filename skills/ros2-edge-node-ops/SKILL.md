@@ -5,6 +5,11 @@ description: Use when running, restarting or debugging ROS 2 nodes on an edge de
 
 # ROS 2 node operations on an edge device over SSH
 
+> **These are commands the human runs, not tool calls.** The plugin's tools are read-only: they
+> read the graph, measure a rate, sample a message and grab a frame, and never start, stop, kill or
+> restart anything. Everything below — tmux sessions, `pgrep`, redirects, `systemd` — is a manual
+> operation you run over SSH while the agent observes and verifies the result.
+
 ## A process that is running is not a node that works
 
 The cheapest false positive in robotics is `systemctl status` or `pgrep` saying the node is up.

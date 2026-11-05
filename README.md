@@ -37,7 +37,9 @@ Defaults come from `plugin.yaml`.
 Hermes. Nothing is bundled with the plugin, and that is deliberate: the ROS 2 documentation, nav2,
 moveit2 and `ros2_control` docs are third-party work under Apache-2.0, BSD-3-Clause and CC-BY-4.0,
 and normalising 412 documents into markdown makes a derivative. So the corpus stays where the user
-put it and every answer is quoted with its provenance.
+put it, and an answer is quoted with its provenance **when the corpus provides it**: `source_repo`,
+`source_path` and `source_commit` come from a file's frontmatter and are empty strings when it has
+none, so a hit without them is a plain excerpt, not a citation.
 
 ```bash
 hermes config set plugins.entries.ros2-console.settings.docs_path /path/to/ros2-study
@@ -45,8 +47,9 @@ hermes config set plugins.entries.ros2-console.settings.docs_path /path/to/ros2-
 
 That path should contain markdown; if it also has `graphify-out/graph.json` the tool queries the
 knowledge graph (about 0.3–0.5 s for a 3,718-node graph), otherwise it falls back to `ripgrep` over
-the markdown. Each result carries `source_repo`, `source_path`, `source_commit` and a bounded prose
-excerpt — never a table row or a code fence, which match every query term and read badly.
+the markdown. Each result carries `source_repo`, `source_path`, `source_commit` — empty strings when
+the file has no frontmatter — and a bounded prose excerpt, never a table row or a code fence, which
+match every query term and read badly.
 
 Measured on a 412-document corpus: `why transient local durability` → 0.41 s, prose excerpt from
 `ros2/design@93a415b`. This is the tool for architecture questions; for "why is this topic dead" the
@@ -54,8 +57,8 @@ graph view is the faster answer.
 
 ## Bundled skills
 
-The plugin ships three read-only skills that carry the triage discipline its tools assume. They load
-on demand as `ros2-console:<name>`:
+The plugin ships three advisory skills — documents the plugin never executes — that carry the
+triage discipline its tools assume. They load on demand as `ros2-console:<name>`:
 
 | Skill | Use it when |
 |---|---|
@@ -82,7 +85,9 @@ and the dash speed follows the measured `msg/s` — motion is evidence, not deco
 the same data as rows. A legend spells out all six states and the line grammar.
 
 **Poll** repeats the read every 15 s (a read costs 11–12 s on real hardware, so faster polling only
-queues work), and it stays off until you turn it on. While polling, the camera re-grabs every 8 s.
+queues work), and it is **on while the page is open**: opening the page starts it and leaving stops
+it, so nothing reads a robot in the background. The Poll button turns it off and on. While polling,
+the camera re-grabs every 8 s.
 
 Hovering a topic peeks at its last message; clicking pins the card so you can move into it and copy
 the payload, pretty-printed when it is JSON. Frames decode offscreen before swapping in, so a refresh
@@ -93,8 +98,14 @@ never blanks the picture.
 The plugin runs: `ros2 node list`, `ros2 topic list`, `ros2 topic info`, `ros2 topic hz`, one `rclpy`
 process that introspects the graph and subscribes briefly (2 s, `depth 10`, the publisher's own QoS)
 to each non-system topic to count messages, one short subscription to the camera topic to save a
-frame, and `graphify`/`ripgrep` against the local `docs_path`. The plugin does not publish to a topic,
-does not call `ros2 param set`, and does not kill or restart nodes.
+frame, and `graphify`/`ripgrep` against the local `docs_path`. Every **tool** is read-only: the
+plugin does not publish to a topic, does not call `ros2 param set`, and does not start, stop, kill
+or restart a node.
+
+That is a limit of the tools, not of the documentation. The bundled `ros2-edge-node-ops` skill
+describes running, restarting and supervising nodes over SSH — `tmux`, `pgrep`, redirects, `systemd`.
+Those are commands **you** run in a terminal: the skill is text, and the plugin executes none of it.
+Read that skill as a runbook for the human, and this list as what the agent itself does.
 
 SSH runs with `BatchMode=yes`. Authentication is your SSH config and agent. The plugin stores no password and no key. One command keeps at most 200,000 characters of output; a camera frame larger than that fails with a size error rather than saving a truncated image. The plugin sends no telemetry.
 

@@ -280,9 +280,14 @@ _TOOLS = [
         schema={
             "name": "ros2_topic_sample",
             "description": (
-                "Capture one message from a topic as bounded YAML text (array fields omitted, "
-                "long strings truncated). Use it to see what a node actually publishes without "
-                "flooding the context."
+                "Capture one message from a topic as a single line of text: whitespace collapsed "
+                "to single spaces and cut at 1200 characters (20000 for a String topic, whose "
+                "payload is returned verbatim). No field is dropped to make room — a long or "
+                "nested message is truncated at the limit, so a missing tail means 'cut off', "
+                "never 'absent'. Images are summarised rather than dumped: shape, encoding and "
+                "step for a raw Image, format and byte count for a CompressedImage. The reply "
+                "also carries the message type and header stamp. Use it to see what a node "
+                "actually publishes without flooding the context."
             ),
             "parameters": {
                 "type": "object",
@@ -302,15 +307,20 @@ _TOOLS = [
         schema={
             "name": "ros2_camera_snapshot",
             "description": (
-                "Grab one frame from a sensor_msgs/CompressedImage topic and save it as a JPEG "
-                "on the machine running Hermes, returning the path so it can be inspected or "
-                "shown. This is how a robot's camera becomes something the agent can actually look at."
+                "Grab one frame from an image topic and save it to the plugin's frames directory, "
+                "returning the path so it can be inspected or shown. A "
+                "sensor_msgs/CompressedImage payload is written through unchanged and a raw "
+                "sensor_msgs/Image is decoded on the robot from its encoding, step and colour "
+                "order (rgb8, bgr8, rgba8, bgra8, mono8), which needs numpy and Pillow there. "
+                "The path always ends .jpg, so trust the returned `format` for the real "
+                "encoding. Any other type is refused by name. This is how a robot's camera "
+                "becomes something the agent can actually look at."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "topic": {"type": "string",
-                              "description": "Compressed image topic, e.g. /camera/image_raw/compressed."},
+                              "description": "Image topic: /camera/image_raw/compressed, or a raw /camera/image_raw."},
                     "seconds": {"type": "integer", "description": "Wait for a frame, 2-20s (default 8)."},
                     "host": {"type": "string", "description": "Override the SSH target for this call."},
                 },
@@ -327,9 +337,9 @@ _TOOLS = [
             "description": (
                 "Answer an architecture question ('how does the executor model work', "
                 "'why transient-local durability') from the user's local ROS 2 documentation "
-                "corpus, returning bounded excerpts with the upstream repo and commit for "
-                "each one. Requires docs_path to be configured; it is a knowledge tool, not "
-                "a live-robot tool."
+                "corpus, returning bounded prose excerpts, each with the upstream repo and commit "
+                "when the corpus frontmatter records them (empty strings otherwise). Requires "
+                "docs_path to be configured; it is a knowledge tool, not a live-robot tool."
             ),
             "parameters": {
                 "type": "object",

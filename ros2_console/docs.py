@@ -296,7 +296,9 @@ def query(docs_path: str, question: str, limit: int = DEFAULT_LIMIT, timeout: in
         "note": (
             "Excerpts are normalised derivatives of upstream documentation "
             "(RST converted to markdown, headings stripped). Quote with the "
-            "source_repo/source_commit shown."
+            "source_repo/source_commit shown when they are present: a result whose "
+            "source fields are empty came from a file with no frontmatter, so treat "
+            "it as an excerpt to verify rather than a citation."
         ),
         "docs": info,
     }
