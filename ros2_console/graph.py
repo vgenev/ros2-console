@@ -51,17 +51,45 @@ except Exception:
 end = time.time() + 3.0
 while time.time() < end:
     rclpy.spin_once(node, timeout_sec=0.1)
-total_pubs = 0
+rows = []
 for name, types in sorted(node.get_topic_names_and_types()):
     typ = types[0] if types else "?"
     try:
-        pubs = len(node.get_publishers_info_by_topic(name))
-        subs = len(node.get_subscriptions_info_by_topic(name))
+        pinfo = node.get_publishers_info_by_topic(name)
+        sinfo = node.get_subscriptions_info_by_topic(name)
+        pubs, subs = len(pinfo), len(sinfo)
     except Exception:
+        pinfo = sinfo = []
         pubs = subs = -1
+    rows.append([name, typ, pubs, subs, pinfo, sinfo])
+
+# An endpoint can be missing from the graph cache for a moment mid-discovery,
+# which would report a healthy topic as dead. Anything suspicious gets a second
+# look after another discovery interval, and the higher count wins: a false
+# orphan is worse than a slow answer.
+suspicious = [row for row in rows if row[2] == 0 or row[3] == 0]
+if suspicious:
+    time.sleep(1.0)
+    for _ in range(3):
+        rclpy.spin_once(node, timeout_sec=0.2)
+    for row in suspicious:
+        try:
+            row[2] = max(row[2], len(node.get_publishers_info_by_topic(row[0])))
+            row[3] = max(row[3], len(node.get_subscriptions_info_by_topic(row[0])))
+        except Exception:
+            pass
+
+total_pubs = 0
+for name, typ, pubs, subs, pinfo, sinfo in rows:
     if pubs > 0:
         total_pubs += pubs
     print("@@T|%s|%s|%s|%s" % (name, pubs, subs, typ))
+    for role, infos in (("P", pinfo), ("S", sinfo)):
+        for info in infos:
+            node_name = (info.node_namespace.rstrip("/") + "/" + info.node_name).replace("//", "/")
+            if "UNKNOWN" in node_name:
+                node_name = "<unnamed participant>"
+            print("@@E|%s|%s|%s|%s" % (name, role, node_name, getattr(info, "topic_type", typ)))
 print("@@PUBS %d" % total_pubs)
 node.destroy_node()
 rclpy.shutdown()
@@ -90,7 +118,7 @@ found=$(printf '%s\n' "$FAST" | grep -c '^@@T|')
 pubs=$(printf '%s\n' "$FAST" | sed -n 's/^@@PUBS *//p' | head -1)
 want=$(printf '%s\n' "$TOPICS_OUT" | grep -c '^/')
 if [ -n "$found" ] && [ "${found:-0}" -ge "${want:-0}" ] && [ "${pubs:-0}" -gt 0 ]; then
-  printf '%s\n' "$FAST" | grep '^@@T|'
+  printf '%s\n' "$FAST" | grep -E '^(@@T|@@E)\|'
 else
   for t in $(ros2 topic list 2>/dev/null | head -300); do
     info=$(ros2 topic info "$t" 2>/dev/null)
@@ -163,6 +191,18 @@ def parse_graph(text: str, *, include_system: bool = False) -> dict:
         entry["publishers"] = _count(pubs)
         entry["subscribers"] = _count(subs)
 
+    edges: list[dict] = []
+    for line in sections.get("detail", []):
+        if not line.startswith("@@E|"):
+            continue
+        parts = (line.split("|", 4) + ["", "", "", ""])[:4]
+        _, topic_name, role, node_name = parts
+        edges.append({
+            "topic": topic_name,
+            "role": "publisher" if role == "P" else "subscriber",
+            "node": node_name or "?",
+        })
+
     for entry in topics.values():
         entry["health"], entry["health_text"] = _classify(entry)
 
@@ -175,6 +215,7 @@ def parse_graph(text: str, *, include_system: bool = False) -> dict:
         "rmw": rmw,
         "nodes": nodes,
         "topics": ordered,
+        "edges": edges,
         "counts": {
             "nodes": len(nodes),
             "topics": len(ordered),
@@ -326,35 +367,98 @@ def sample(target: Target, topic: str, seconds: int = 6) -> tuple[dict, Result]:
 
 SNAPSHOT_BODY = r'''
 import base64
+import io
 import sys
 import time
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import CompressedImage
+from rclpy.qos import qos_profile_sensor_data
 
 topic, seconds = sys.argv[1], float(sys.argv[2])
 rclpy.init()
 node = Node("hermes_ros2_snapshot")
 box = {}
 
+# Which message type does this topic actually carry? Ask the graph instead of
+# guessing: a raw `sensor_msgs/Image` and a `CompressedImage` share a topic name
+# shape but need different decoding, and most robot cameras publish raw.
+types = []
+settle = time.time() + 4.0
+while time.time() < settle and not types:
+    types = dict(node.get_topic_names_and_types()).get(topic, [])
+    rclpy.spin_once(node, timeout_sec=0.15)
 
-def handle(msg):
+if not types:
+    # Discovery can lag on a busy host. Absence from the cache is not proof the
+    # topic is missing, so still try the compressed path before giving up: the
+    # subscription itself will fail fast if the topic truly is not there.
+    types = ["sensor_msgs/msg/CompressedImage"]
+
+msg_type = types[0]
+if not msg_type.endswith(("/Image", "/CompressedImage")):
+    print("@@ERR topic %s carries %s, not an image (CompressedImage or Image)" % (topic, msg_type))
+    sys.exit(3)
+is_raw = msg_type.endswith("/Image")
+
+
+def handle_compressed(msg):
     box["data"] = bytes(msg.data)
     box["format"] = msg.format
     box["stamp"] = f"{msg.header.stamp.sec}.{msg.header.stamp.nanosec:09d}"
 
 
-node.create_subscription(CompressedImage, topic, handle, 1)
+def handle_raw(msg):
+    import numpy as np
+    from PIL import Image
+
+    h, w, step = msg.height, msg.width, msg.step
+    channels = {"rgb8": 3, "bgr8": 3, "rgba8": 4, "bgra8": 4, "mono8": 1}.get(msg.encoding)
+    if channels is None:
+        box["err"] = "unsupported encoding %s (rgb8, bgr8, rgba8, bgra8, mono8)" % msg.encoding
+        return
+    buf = np.frombuffer(bytes(msg.data), dtype=np.uint8)
+    if buf.size < h * step:
+        box["err"] = "truncated payload: %d bytes for %dx%d step %d" % (buf.size, h, w, step)
+        return
+    rows = buf[: h * step].reshape(h, step)[:, : w * channels]
+    arr = rows.reshape(h, w, channels)
+    if channels == 1:
+        img = Image.fromarray(arr[:, :, 0], mode="L")
+    else:
+        if msg.encoding in ("bgr8", "bgra8"):
+            arr = arr[:, :, [2, 1, 0] + ([3] if channels == 4 else [])]
+        img = Image.fromarray(arr[:, :, :3], mode="RGB")
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=85)
+    box["data"] = out.getvalue()
+    box["format"] = "jpeg"
+    box["source"] = "%s %dx%d %s" % (msg.encoding, w, h, msg_type.split("/")[-1])
+    box["stamp"] = f"{msg.header.stamp.sec}.{msg.header.stamp.nanosec:09d}"
+
+
+if is_raw:
+    from sensor_msgs.msg import Image
+
+    node.create_subscription(Image, topic, handle_raw, qos_profile_sensor_data)
+else:
+    from sensor_msgs.msg import CompressedImage
+
+    node.create_subscription(CompressedImage, topic, handle_compressed, qos_profile_sensor_data)
+
 deadline = time.time() + seconds
-while rclpy.ok() and "data" not in box and time.time() < deadline:
+while rclpy.ok() and "data" not in box and "err" not in box and time.time() < deadline:
     rclpy.spin_once(node, timeout_sec=0.2)
 node.destroy_node()
 rclpy.shutdown()
 
-if "data" not in box:
-    print("@@ERR no CompressedImage within %.1fs on %s" % (seconds, topic))
+if "err" in box:
+    print("@@ERR " + box["err"])
     sys.exit(3)
+if "data" not in box:
+    print("@@ERR no %s within %.1fs on %s" % (msg_type.split("/")[-1], seconds, topic))
+    sys.exit(3)
+print("@@SOURCE " + str(box.get("source", box["format"])))
 print("@@FORMAT " + str(box["format"]))
 print("@@STAMP " + box["stamp"])
 print("@@BYTES %d" % len(box["data"]))
@@ -363,7 +467,7 @@ print("@@B64 " + base64.b64encode(box["data"]).decode("ascii"))
 
 
 def snapshot(target: Target, topic: str, seconds: int = 8) -> tuple[dict, Result]:
-    """Grab one camera frame. Raw `sensor_msgs/Image` is refused with a pointer to republish."""
+    """Grab one camera frame. Handles `CompressedImage` and raw `Image` (decoded on the robot)."""
     topic = validate_topic(topic)
     seconds = max(2, min(20, int(seconds)))
     script = f"python3 - {shlex.quote(topic)} {seconds} <<'HERMES_SNAPSHOT'\n{SNAPSHOT_BODY}\nHERMES_SNAPSHOT"
@@ -372,8 +476,8 @@ def snapshot(target: Target, topic: str, seconds: int = 8) -> tuple[dict, Result
     if "@@ERR" in stdout:
         message = stdout.split("@@ERR", 1)[1].strip().splitlines()[0]
         return {"topic": topic, "ok": False, "error": message,
-                "hint": "this tool reads sensor_msgs/CompressedImage; publish a compressed "
-                        "topic (image_transport republish) or use ros2_topic_sample instead"}, result
+                "hint": "check the topic exists on this graph and is publishing; raw Image is "
+                        "decoded on the robot when numpy and PIL are present"}, result
     if "@@B64 " not in stdout:
         return {"topic": topic, "ok": False,
                 "error": (result.error() if not result.ok else "no image payload returned")}, result
@@ -387,6 +491,8 @@ def snapshot(target: Target, topic: str, seconds: int = 8) -> tuple[dict, Result
             meta["stamp"] = line[len("@@STAMP "):].strip()
         elif line.startswith("@@BYTES "):
             meta["bytes"] = int(line[len("@@BYTES "):].strip() or 0)
+        elif line.startswith("@@SOURCE "):
+            meta["source"] = line[len("@@SOURCE "):].strip()
     return {"topic": topic, "ok": True, "encoding": "base64", "data": payload,
             **meta}, result
 

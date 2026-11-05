@@ -163,3 +163,47 @@ def test_inverse_health_is_rejected(pubs, subs, expected, rejected):
         assert orphan_names == ["/probe"]
     else:
         assert orphan_names == []
+
+
+EDGE_TEXT = """@@DISTRO jazzy
+@@RMW
+@@NODES
+/talker
+/listener
+@@TOPICS
+/chatter [std_msgs/msg/String]
+/quiet [std_msgs/msg/String]
+@@DETAIL
+@@T|/chatter|1|1|std_msgs/msg/String
+@@E|/chatter|P|/talker|std_msgs/msg/String
+@@E|/chatter|S|/listener|std_msgs/msg/String
+@@T|/quiet|1|0|std_msgs/msg/String
+@@E|/quiet|P|/talker|std_msgs/msg/String
+@@END
+"""
+
+
+def test_edges_carry_the_node_that_owns_each_endpoint():
+    """A list of topics does not say who publishes them; the topology does."""
+    parsed = parse_graph(EDGE_TEXT)
+    edges = parsed["edges"]
+    assert {
+        "topic": "/chatter",
+        "role": "publisher",
+        "node": "/talker",
+    } in edges
+    assert {
+        "topic": "/chatter",
+        "role": "subscriber",
+        "node": "/listener",
+    } in edges
+    assert len([e for e in edges if e["topic"] == "/quiet"]) == 1
+
+
+def test_unnamed_participants_are_not_rendered_as_raw_unknown_tokens():
+    text = EDGE_TEXT.replace(
+        "@@E|/quiet|P|/talker|std_msgs/msg/String",
+        "@@E|/quiet|P|<unnamed participant>|std_msgs/msg/String",
+    )
+    parsed = parse_graph(text)
+    assert any(e["node"] == "<unnamed participant>" for e in parsed["edges"])

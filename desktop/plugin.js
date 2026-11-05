@@ -94,6 +94,91 @@ function OrphanBanner({ graph }) {
   })
 }
 
+function Topology({ graph }) {
+  const edges = (graph && graph.edges) || []
+  const topics = (graph && graph.topics) || []
+  if (!edges.length) {
+    return jsx('p', {
+      children:
+        'No edges yet. Edge data needs the rclpy introspection path (it is absent when ' +
+        'only the daemon fallback ran).',
+    })
+  }
+  const health = new Map(topics.map((t) => [t.name, t.health]))
+  const names = new Set(edges.map((e) => e.node))
+  for (const n of (graph && graph.nodes) || []) names.add(n)
+  const nodeList = [...names].sort()
+  const topicList = [...new Set(edges.map((e) => e.topic))].sort()
+  const rowH = 26
+  const W = 820
+  const LANE_L = 210
+  const LANE_R = W - 210
+  const height = Math.max(nodeList.length, topicList.length) * rowH + 24
+  const nodeY = new Map(nodeList.map((n, i) => [n, 18 + i * rowH]))
+  const topicY = new Map(topicList.map((t, i) => [t, 18 + i * rowH]))
+
+  const lines = edges.map((e, i) => {
+    const y1 = nodeY.get(e.node)
+    const y2 = topicY.get(e.topic)
+    if (y1 == null || y2 == null) return null
+    const color = HEALTH_COLOR[health.get(e.topic)] || '#9aa3b5'
+    return jsx('path', {
+      d:
+        'M ' + LANE_L + ' ' + y1 + ' C ' + (LANE_L + 110) + ' ' + y1 + ', ' +
+        (LANE_R - 110) + ' ' + y2 + ', ' + LANE_R + ' ' + y2,
+      fill: 'none',
+      stroke: color,
+      'stroke-width': e.role === 'publisher' ? 1.6 : 1.1,
+      'stroke-dasharray': e.role === 'publisher' ? '0' : '4 3',
+      opacity: 0.75,
+    }, 'e' + i)
+  })
+
+  return jsxs('div', {
+    style: { overflow: 'auto', border: '1px solid var(--ui-stroke-secondary, #8883)', borderRadius: '6px' },
+    children: [
+      jsxs('svg', {
+        width: String(W),
+        height: String(Math.max(height, 60)),
+        style: { display: 'block' },
+        children: [
+          ...lines,
+          ...nodeList.map((n) =>
+            jsx('text', {
+              x: String(LANE_L - 8),
+              y: String(nodeY.get(n) + 4),
+              'text-anchor': 'end',
+              'font-size': '11',
+              fill: 'var(--ui-text-secondary)',
+              children: n.length > 30 ? n.slice(0, 29) + '…' : n,
+            }, 'n' + n)
+          ),
+          ...topicList.map((t) => {
+            const h = health.get(t)
+            return jsxs('g', {
+              children: [
+                jsx('circle', {
+                  cx: String(LANE_R + 6),
+                  cy: String(topicY.get(t)),
+                  r: '3.5',
+                  fill: HEALTH_COLOR[h] || '#9aa3b5',
+                }, 'd' + t),
+                jsx('text', {
+                  x: String(LANE_R + 15),
+                  y: String(topicY.get(t) + 4),
+                  'font-size': '11',
+                  fill: 'var(--ui-text-secondary)',
+                  children: t,
+                }, 't' + t),
+              ],
+            }, 'g' + t)
+          }),
+        ],
+      }),
+    ],
+  })
+}
+
 function GraphTable({ graph }) {
   const topics = (graph && graph.topics) || []
   if (!topics.length) return jsx('p', { children: 'No topics on this target.' })
@@ -152,23 +237,35 @@ function Pane({ ctx, bus }) {
   const [polling, setPolling] = useState(false)
   const [topic, setTopic] = useState(() => {
     try {
-      return ctx.storage.get('cameraTopic', DEFAULT_TOPIC) || DEFAULT_TOPIC
+      return ctx.storage.get('cameraTopic', '') || DEFAULT_TOPIC
     } catch (err) {
       return DEFAULT_TOPIC
     }
   })
+  const [topicTouched, setTopicTouched] = useState(false)
   const [frame, setFrame] = useState(null)
   const [frameError, setFrameError] = useState('')
   const [busy, setBusy] = useState(false)
   const [hostDraft, setHostDraft] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [view, setView] = useState('topology')
 
   // The pane is useless without a target, and an installed user should not have to
   // hand-edit config.yaml to name their robot. Seed once from the saved settings.
   useEffect(() => {
     if (snap.settings && !hostDraft) setHostDraft(snap.settings.host || '')
   }, [snap.settings])
+
+  // Same reasoning for the camera: a hardcoded topic only matches the demo cell.
+  // Take the first image topic this graph actually has, until the user types one.
+  useEffect(() => {
+    if (topicTouched) return
+    const topics = (snap.graph && snap.graph.topics) || []
+    const image = topics.find((t) => /\/CompressedImage$/.test(t.type || '')) ||
+      topics.find((t) => /\/Image$/.test(t.type || ''))
+    if (image && image.name !== topic) setTopic(image.name)
+  }, [snap.graph, topicTouched])
 
   async function save() {
     const base = snap.settings || {}
@@ -195,6 +292,7 @@ function Pane({ ctx, bus }) {
   function onTopic(event) {
     const next = event.target.value
     setTopic(next)
+    setTopicTouched(true)
     try {
       ctx.storage.set('cameraTopic', next)
     } catch (err) {
@@ -290,12 +388,24 @@ function Pane({ ctx, bus }) {
             },
             children: polling ? 'Polling every 5s' : 'Poll',
           }),
+          jsx('button', {
+            type: 'button',
+            onClick: () => setView('topology'),
+            children: view === 'topology' ? '• Topology' : 'Topology',
+          }),
+          jsx('button', {
+            type: 'button',
+            onClick: () => setView('table'),
+            children: view === 'table' ? '• Table' : 'Table',
+          }),
         ],
       }),
       snap.error ? jsx('p', { children: snap.error }) : null,
       jsx(OrphanBanner, { graph: snap.graph }),
       snap.graph
-        ? jsx(GraphTable, { graph: snap.graph })
+        ? view === 'topology'
+          ? jsx(Topology, { graph: snap.graph })
+          : jsx(GraphTable, { graph: snap.graph })
         : snap.error
           ? null
           : jsx('p', { children: 'Waiting for the graph.' }),

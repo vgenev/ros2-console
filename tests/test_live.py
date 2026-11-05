@@ -94,6 +94,8 @@ def test_camera_snapshot_writes_a_jpeg(frame_dir):
 def test_snapshot_of_a_non_image_topic_writes_nothing(frame_dir):
     data = _call(_camera_snapshot, "/chatter", 4)
     assert data["ok"] is False
-    assert "CompressedImage" in data["error"]
+    # The tool now decodes raw Image as well, so the honest assertion is that a
+    # topic which publishes no image at all is named as such and writes no file.
+    assert "not an image" in data["error"]
     assert "Traceback" not in data["error"]
     assert list(frame_dir.iterdir()) == []
