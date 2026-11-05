@@ -379,10 +379,15 @@ function GraphTable({ graph, onHover, onLeave }) {
 
 function TopicTip({ tip }) {
   const data = tip.data
+  const rawError = tip.error || ''
+  const error =
+    /404/.test(rawError)
+      ? 'this route is not loaded yet — the gateway is running an older plugin build; restart it to enable hover samples'
+      : rawError
   const body = tip.loading
     ? 'reading one message…'
-    : tip.error
-      ? tip.error
+    : error
+      ? error
       : data
         ? data.received
           ? data.message
