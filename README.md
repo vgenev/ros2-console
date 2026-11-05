@@ -96,7 +96,7 @@ to each non-system topic to count messages, one short subscription to the camera
 frame, and `graphify`/`ripgrep` against the local `docs_path`. The plugin does not publish to a topic,
 does not call `ros2 param set`, and does not kill or restart nodes.
 
-SSH runs with `BatchMode=yes`. Authentication is your SSH config and agent. The plugin stores no password and no key. One command keeps at most 200,000 characters of output. The plugin sends no telemetry.
+SSH runs with `BatchMode=yes`. Authentication is your SSH config and agent. The plugin stores no password and no key. One command keeps at most 200,000 characters of output; a camera frame larger than that fails with a size error rather than saving a truncated image. The plugin sends no telemetry.
 
 ## Reach the robot
 
@@ -110,6 +110,8 @@ Host ros2demo
 ```
 
 `ssh -o BatchMode=yes ros2demo` has to succeed with no prompt. If a password would have been required, the command fails in about six seconds.
+
+`host` is checked against an allow-list before ssh runs: a hostname, IPv4 address, ssh_config alias or `user@host`. Anything else — including a value that starts with `-`, which ssh would read as an option — is refused, so a hostile `host` from a tool call, a settings POST or `/graph?host=` never becomes an argv.
 
 ## Limits
 

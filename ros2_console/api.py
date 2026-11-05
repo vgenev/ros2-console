@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException
 from . import graph as obs
 from .settings import PLUGIN_ID, resolve, stored
 from .tools import _graph
-from .transport import Target
+from .transport import Target, validate_destination, validate_distro
 
 router = APIRouter()
 
@@ -66,6 +66,14 @@ def post_settings(body: dict) -> dict:
     key = _bad_key(body)
     if key:
         _reject(key)
+    # The values are model-controllable, and `host` becomes an ssh argv and
+    # `distro` a remote path: refuse them here so a hostile value is never
+    # persisted and never breaks every later call.
+    for name, check in (("host", validate_destination), ("distro", validate_distro)):
+        try:
+            check(body[name])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"key": name, "error": str(exc)}) from exc
     payload = {name: body[name] for name in _FIELDS}
     try:
         write_settings(payload)

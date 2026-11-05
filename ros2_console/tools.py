@@ -33,8 +33,10 @@ def _target(args: dict, ctx: Any = None) -> Target:
 
 
 def _call(fn, args: dict, ctx=None) -> str:
-    target = _target(args, ctx)
     try:
+        # A rejected host/distro raises here; a tool handler must answer with
+        # JSON, never with an exception the caller sees as a crash.
+        target = _target(args, ctx)
         payload, result = fn(target, args)
     except ValueError as exc:
         return json.dumps({"ok": False, "error": str(exc)})
@@ -55,9 +57,9 @@ def _host_status(args, ctx=None):
 
 
 def _graph(args, ctx=None):
-    target = _target(args, ctx)
     include_system = bool((args or {}).get("include_system"))
     try:
+        target = _target(args, ctx)
         data, result = obs.graph(target, include_system=include_system)
     except ValueError as exc:
         return json.dumps({"ok": False, "error": str(exc)})
@@ -103,11 +105,11 @@ def _topic_sample(args, ctx=None):
 
 
 def _camera_snapshot(args, ctx=None):
-    target = _target(args, ctx)
     topic = (args or {}).get("topic")
     if not topic:
         return json.dumps({"ok": False, "error": "topic is required, e.g. /camera/image_raw/compressed"})
     try:
+        target = _target(args, ctx)
         data, result = obs.snapshot(target, topic, args.get("seconds", 8))
     except ValueError as exc:
         return json.dumps({"ok": False, "error": str(exc)})
@@ -141,8 +143,8 @@ def _docs_query(args, ctx=None):
 def _call_requires_topic(work, args, ctx) -> str:
     if not (args or {}).get("topic"):
         return json.dumps({"ok": False, "error": "topic is required, e.g. /chatter"})
-    target = _target(args, ctx)
     try:
+        target = _target(args, ctx)
         payload, result = work(target, args)
     except ValueError as exc:
         return json.dumps({"ok": False, "error": str(exc)})

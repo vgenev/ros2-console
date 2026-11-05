@@ -61,7 +61,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--snapshot", action="append", default=[], help="Compressed image topic to save.")
     parser.add_argument("--seconds", type=int, default=5, help="Window for --rate, --sample, and --snapshot.")
     args = parser.parse_args(argv)
-    payload = probe(args.target)
+    try:
+        payload = probe(args.target)
+    except ValueError as exc:
+        # A refused ssh destination or distro is user input, not a crash.
+        parser.error(str(exc))
     if args.rate or args.sample:
         target = build_target(args.target)
         payload["rates"] = [

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 import shlex
 
-from .transport import Result, Target, run
+from .transport import Result, Target, ensure_complete, run
 
 TOPIC_RE = re.compile(r"^/[A-Za-z0-9_/]+$")
 _NUM = re.compile(r"(?:average rate|min|max|std dev|window):\s*([0-9.]+)", re.I)
@@ -681,6 +681,9 @@ def snapshot(target: Target, topic: str, seconds: int = 8) -> tuple[dict, Result
     seconds = max(2, min(20, int(seconds)))
     script = f"python3 - {shlex.quote(topic)} {seconds} <<'HERMES_SNAPSHOT'\n{SNAPSHOT_BODY}\nHERMES_SNAPSHOT"
     result = run(target, script, timeout=seconds + 12, label=f"snapshot {topic}")
+    # A truncated capture has no usable tail: the base64 block is cut mid-stream,
+    # so decoding it yields a corrupt image or a ValueError. Say "too large".
+    ensure_complete(result, f"camera snapshot of {topic}")
     stdout = result.stdout or ""
     if "@@ERR" in stdout:
         message = stdout.split("@@ERR", 1)[1].strip().splitlines()[0]
