@@ -1,0 +1,17 @@
+name: ros2-console
+repo: https://github.com/OWNER/ros2-console
+# Placeholder. Replace with the 40-hex commit after the first public push.
+sha: "0000000000000000000000000000000000000000"
+description: Read a live ROS 2 graph over SSH. Report topic health, publish rate, one message, and a compressed camera frame.
+maintainer: vgenev
+tier: community
+category: tools
+requires_hermes: ">=0.22.0"
+version: "0.1.0"
+capabilities:
+  provides_tools:
+    - ros2_host_status
+    - ros2_graph
+    - ros2_topic_rate
+    - ros2_topic_sample
+    - ros2_camera_snapshot
