@@ -122,6 +122,54 @@ function OrphanBanner({ graph }) {
   })
 }
 
+function Legend() {
+  const items = [
+    ['live', 'live — connected, data flowing'],
+    ['silent', 'silent — connected, nothing in the sample window'],
+    ['state', 'state — latched, keeps last value for late subscribers'],
+    ['dead_output', 'dead output — published, nobody subscribes'],
+    ['dead_input', 'dead input — subscribed, nobody publishes'],
+    ['unmeasured', 'unmeasured — counts unavailable'],
+  ]
+  return jsxs('div', {
+    style: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: '10px 16px',
+      fontSize: '11px',
+      color: 'var(--ui-text-tertiary)',
+      padding: '8px 4px 2px',
+      borderTop: '1px solid var(--ui-stroke-secondary, #8883)',
+      marginTop: '4px',
+    },
+    children: [
+      ...items.map(([key, label]) =>
+        jsxs('span', {
+          style: { display: 'inline-flex', gap: '5px', alignItems: 'center' },
+          children: [
+            jsx('span', {
+              style: {
+                width: '9px',
+                height: '9px',
+                borderRadius: '50%',
+                background: HEALTH_COLOR[key],
+                display: 'inline-block',
+              },
+            }, 'sw' + key),
+            jsx('span', { children: label }, 'lb' + key),
+          ],
+        }, key)
+      ),
+      jsx('span', {
+        style: { width: '100%' },
+        children:
+          'solid line = publisher → topic · dashed = topic → subscriber · ' +
+          'moving dashes = measured traffic, speed follows msg/s',
+      }, 'lines'),
+    ],
+  })
+}
+
 function Topology({ graph }) {
   const edges = (graph && graph.edges) || []
   const topics = (graph && graph.topics) || []
@@ -221,6 +269,7 @@ function Topology({ graph }) {
           }),
         ],
       }),
+      jsx(Legend, {}, 'legend'),
     ],
   })
 }
