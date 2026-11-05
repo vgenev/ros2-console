@@ -183,6 +183,50 @@ function splitTerms(text) {
     .filter(Boolean)
 }
 
+// Pure, so it can be tested without a renderer. A term matches a node OR a
+// topic: asking for "/example_cell/verdict" is asking for that wire, and a field
+// that silently only knew how to spell node names was a trap.
+function selectEdges(edges, opts) {
+  const terms = opts.terms || []
+  const typeFilter = opts.typeFilter || null
+  const focus = opts.focus || null
+  const healthOf = opts.healthOf || (() => 'unmeasured')
+  const allNodes = [...new Set(edges.map((e) => e.node))]
+  const allTopics = [...new Set(edges.map((e) => e.topic))]
+  const hit = (name) => terms.some((t) => name.toLowerCase().includes(t))
+  const matchedNodes = new Set(terms.length ? allNodes.filter(hit) : [])
+  const matchedTopics = new Set(terms.length ? allTopics.filter(hit) : [])
+
+  let shown = edges
+  if (typeFilter) shown = shown.filter((e) => healthOf(e.topic) === typeFilter)
+  if (terms.length) {
+    // A node hit keeps its wires; a topic hit keeps every wire on that topic.
+    // Both are "the connections of the thing I named".
+    const nodeTopics = new Set(shown.filter((e) => matchedNodes.has(e.node)).map((e) => e.topic))
+    shown = shown.filter(
+      (e) => matchedNodes.has(e.node) || matchedTopics.has(e.topic) || nodeTopics.has(e.topic)
+    )
+  }
+  const focusTopics = focus
+    ? new Set(edges.filter((e) => e.node === focus).map((e) => e.topic))
+    : null
+  if (focus) shown = shown.filter((e) => e.node === focus || focusTopics.has(e.topic))
+
+  const onMatchedTopic = (n) =>
+    shown.some((e) => e.node === n && matchedTopics.has(e.topic)) ||
+    edges.some((e) => e.node === n && matchedTopics.has(e.topic))
+  const dim = (node) => terms.length > 0 && !matchedNodes.has(node) && !onMatchedTopic(node)
+
+  return {
+    shown,
+    nodes: [...new Set(shown.map((e) => e.node))].sort(),
+    topics: [...new Set(shown.map((e) => e.topic))].sort(),
+    matchedNodes,
+    matchedTopics,
+    dim,
+  }
+}
+
 function FilterBar({ query, onQuery, showing, total, activeLabel, onClear }) {
   return jsxs('div', {
     style: {
@@ -196,7 +240,7 @@ function FilterBar({ query, onQuery, showing, total, activeLabel, onClear }) {
       jsx('input', {
         value: query,
         onChange: (ev) => onQuery(ev.target.value),
-        placeholder: 'filter nodes — comma, space, semicolon or | separates names',
+        placeholder: 'filter nodes or topics — comma, space, semicolon or | separates',
         'aria-label': 'filter nodes by name',
         spellCheck: 'false',
         style: {
@@ -320,31 +364,22 @@ function Topology({ graph, onHover, onLeave, onPin }) {
   const allNodes = [...names].sort()
 
   const terms = splitTerms(query)
-  const matched = new Set(
-    terms.length ? allNodes.filter((n) => terms.some((t) => n.toLowerCase().includes(t))) : []
-  )
-
-  // Three filters, all narrowing the same edge list. A node filter keeps the
-  // peers that share a topic on purpose: "what is this node wired to" is only
-  // answerable if the far end of each wire stays visible.
-  let shown = edges
-  if (typeFilter) {
-    shown = shown.filter((e) => (health.get(e.topic) || 'unmeasured') === typeFilter)
-  }
-  if (terms.length) {
-    const matchedTopics = new Set(shown.filter((e) => matched.has(e.node)).map((e) => e.topic))
-    shown = shown.filter((e) => matched.has(e.node) || matchedTopics.has(e.topic))
-  }
+  const sel = selectEdges(edges, {
+    terms,
+    typeFilter,
+    focus,
+    healthOf: (t) => health.get(t) || 'unmeasured',
+  })
+  const shown = sel.shown
+  const matched = sel.matchedNodes
+  const isDim = sel.dim
   const focusTopics = focus
     ? new Set(edges.filter((e) => e.node === focus).map((e) => e.topic))
     : null
-  if (focus) {
-    shown = shown.filter((e) => e.node === focus || focusTopics.has(e.topic))
-  }
 
-  const nodeList = [...new Set(shown.map((e) => e.node))].sort()
+  const nodeList = [...sel.nodes]
   if (focus && !nodeList.includes(focus)) nodeList.push(focus)
-  const topicList = [...new Set(shown.map((e) => e.topic))].sort()
+  const topicList = [...sel.topics]
 
   const rowH = 26
   const W = 820
@@ -353,8 +388,6 @@ function Topology({ graph, onHover, onLeave, onPin }) {
   const height = Math.max(nodeList.length, topicList.length) * rowH + 24
   const nodeY = new Map(nodeList.map((n, i) => [n, 18 + i * rowH]))
   const topicY = new Map(topicList.map((t, i) => [t, 18 + i * rowH]))
-
-  const isDim = (node) => terms.length > 0 && !matched.has(node)
 
   const lines = shown.map((e, i) => {
     const y1 = nodeY.get(e.node)
@@ -416,7 +449,7 @@ function Topology({ graph, onHover, onLeave, onPin }) {
           topicList.length === 0
             ? jsx('p', {
                 style: { padding: '14px', fontSize: '12px', color: SURFACE.muted },
-                children: 'No edges match these filters. Clear one to widen the view.',
+                children: 'No edge matches these filters — no node and no topic contains that text. Clear it to widen the view.',
               }, 'none')
             : jsxs('svg', {
                 width: String(W),
