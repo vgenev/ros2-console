@@ -9,6 +9,7 @@ const HEALTH_COLOR = {
   dead_input: '#ff6b6b',
   dead_output: '#e6b35a',
   unmeasured: '#9aa3b5',
+  state: '#6aa9ff',
 }
 
 const store = {
@@ -61,12 +62,32 @@ function targetLabel(settings) {
   return (settings.host || 'local') + ' · ' + (settings.distro || '')
 }
 
+function LiveDot({ live }) {
+  if (!live) return jsx('span', { style: { color: 'var(--ui-text-tertiary)' }, children: '· idle' })
+  return jsxs('svg', {
+    width: '10',
+    height: '10',
+    viewBox: '0 0 10 10',
+    style: { verticalAlign: 'middle', marginRight: '4px' },
+    children: [
+      jsx('circle', { cx: '5', cy: '5', r: '4', fill: '#3dd68c' }, 'dot'),
+      jsx('animate', {
+        attributeName: 'opacity',
+        values: '1;0.25;1',
+        dur: '1.6s',
+        repeatCount: 'indefinite',
+      }, 'pulse'),
+    ],
+  })
+}
+
 function OrphanBanner({ graph }) {
   const orphans = (graph && graph.orphans) || []
   const counts = (graph && graph.counts) || {}
   const count = counts.orphans != null ? counts.orphans : orphans.length
   const excluded = counts.system_excluded || 0
-  if (!count && !excluded) return null
+  const latched = counts.latched || 0
+  if (!count && !excluded && !latched) return null
   const named = orphans
     .slice(0, 3)
     .map((item) => item.name + ' (' + item.health + ')')
@@ -84,10 +105,16 @@ function OrphanBanner({ graph }) {
     },
     children: [
       headline,
-      excluded
+      excluded || latched
         ? jsx('div', {
             style: { marginTop: '4px', color: 'var(--ui-text-tertiary)' },
-            children: 'System topics were not counted.',
+            children: [
+              excluded ? 'System topics were not counted. ' : '',
+              latched
+                ? latched + ' latched state topic' + (latched === 1 ? '' : 's') +
+                  ' — keeps its last value for late subscribers, so no subscriber is not a fault.'
+                : '',
+            ].join(''),
           })
         : null,
     ],
@@ -121,16 +148,31 @@ function Topology({ graph }) {
     const y1 = nodeY.get(e.node)
     const y2 = topicY.get(e.topic)
     if (y1 == null || y2 == null) return null
-    const color = HEALTH_COLOR[health.get(e.topic)] || '#9aa3b5'
-    return jsx('path', {
-      d:
-        'M ' + LANE_L + ' ' + y1 + ' C ' + (LANE_L + 110) + ' ' + y1 + ', ' +
-        (LANE_R - 110) + ' ' + y2 + ', ' + LANE_R + ' ' + y2,
+    const healthOf = health.get(e.topic)
+    const color = HEALTH_COLOR[healthOf] || '#9aa3b5'
+    const live = healthOf === 'live'
+    const d =
+      'M ' + LANE_L + ' ' + y1 + ' C ' + (LANE_L + 110) + ' ' + y1 + ', ' +
+      (LANE_R - 110) + ' ' + y2 + ', ' + LANE_R + ' ' + y2
+    // Motion is evidence, not decoration: a dash travelling along the edge is a
+    // topic whose publishers and subscribers are actually connected. Dead and
+    // latched edges stay still, so movement always means data is moving.
+    return jsxs('path', {
+      d,
       fill: 'none',
       stroke: color,
-      'stroke-width': e.role === 'publisher' ? 1.6 : 1.1,
-      'stroke-dasharray': e.role === 'publisher' ? '0' : '4 3',
-      opacity: 0.75,
+      'stroke-width': live ? 1.8 : 1.2,
+      'stroke-dasharray': live ? '7 7' : e.role === 'publisher' ? '0' : '4 3',
+      opacity: live ? 0.9 : 0.55,
+      children: live
+        ? jsx('animate', {
+            attributeName: 'stroke-dashoffset',
+            from: '0',
+            to: '-28',
+            dur: '1.1s',
+            repeatCount: 'indefinite',
+          })
+        : null,
     }, 'e' + i)
   })
 
@@ -267,6 +309,17 @@ function Pane({ ctx, bus }) {
     if (image && image.name !== topic) setTopic(image.name)
   }, [snap.graph, topicTouched])
 
+  // Polling the graph alone feels dead on a live robot: the numbers change but
+  // nothing moves. While polling is on, also re-grab the camera, so the picture
+  // itself is the liveness signal.
+  useEffect(() => {
+    if (!polling) return undefined
+    const stop = ctx.setInterval(() => {
+      if (topic) grab()
+    }, 4000)
+    return () => stop()
+  }, [polling, topic])
+
   async function save() {
     const base = snap.settings || {}
     setSaving(true)
@@ -332,6 +385,7 @@ function Pane({ ctx, bus }) {
       jsxs('div', {
         style: { display: 'flex', gap: '8px', alignItems: 'baseline', marginBottom: '8px' },
         children: [
+          jsx(LiveDot, { live: polling }),
           jsx('strong', { children: targetLabel(snap.settings) }),
           jsx('span', {
             style: { color: 'var(--ui-text-tertiary)' },

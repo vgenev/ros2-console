@@ -90,6 +90,14 @@ for name, typ, pubs, subs, pinfo, sinfo in rows:
             if "UNKNOWN" in node_name:
                 node_name = "<unnamed participant>"
             print("@@E|%s|%s|%s|%s" % (name, role, node_name, getattr(info, "topic_type", typ)))
+            if role == "P":
+                try:
+                    raw = info.qos_profile.durability
+                    label = getattr(raw, "name", None) or str(raw)
+                    durability = str(label).split(".")[-1].upper()
+                except Exception:
+                    durability = "UNKNOWN"
+                print("@@D|%s|%s" % (name, durability))
 print("@@PUBS %d" % total_pubs)
 node.destroy_node()
 rclpy.shutdown()
@@ -118,7 +126,7 @@ found=$(printf '%s\n' "$FAST" | grep -c '^@@T|')
 pubs=$(printf '%s\n' "$FAST" | sed -n 's/^@@PUBS *//p' | head -1)
 want=$(printf '%s\n' "$TOPICS_OUT" | grep -c '^/')
 if [ -n "$found" ] && [ "${found:-0}" -ge "${want:-0}" ] && [ "${pubs:-0}" -gt 0 ]; then
-  printf '%s\n' "$FAST" | grep -E '^(@@T|@@E)\|'
+  printf '%s\n' "$FAST" | grep -E '^(@@T|@@E|@@D)\|'
 else
   for t in $(ros2 topic list 2>/dev/null | head -300); do
     info=$(ros2 topic info "$t" 2>/dev/null)
@@ -140,7 +148,14 @@ HEALTH_TEXT = {
     "dead_input": "has subscribers but nobody publishes — subscribers wait forever",
     "dead_output": "has publishers but nobody subscribes — output is being discarded",
     "unmeasured": "publisher/subscriber counts unavailable (permissions or a slow host)",
+    "state": "latched state topic: publishes on change and a late subscriber still receives "
+             "the current value, so no subscriber yet is not a fault",
 }
+
+# Durability that makes "nobody subscribed right now" a non-event: the publisher
+# holds the last sample and delivers it when a consumer finally connects. Calling
+# those orphans produces false alarms on exactly the topics that are healthy.
+LATCHED_DURABILITY = {"TRANSIENT_LOCAL", "TRANSIENT"}
 
 
 def _split_sections(text: str) -> dict[str, list[str]]:
@@ -193,6 +208,13 @@ def parse_graph(text: str, *, include_system: bool = False) -> dict:
 
     edges: list[dict] = []
     for line in sections.get("detail", []):
+        if line.startswith("@@D|"):
+            parts = (line.split("|", 2) + ["", "", ""])[:3]
+            _, topic_name, durability = parts
+            entry = topics.get(topic_name)
+            if entry is not None and durability:
+                entry["durability"] = durability.upper()
+            continue
         if not line.startswith("@@E|"):
             continue
         parts = (line.split("|", 4) + ["", "", "", ""])[:4]
@@ -210,6 +232,7 @@ def parse_graph(text: str, *, include_system: bool = False) -> dict:
     broken = [t for t in ordered if t["health"] in ("dead_input", "dead_output")]
     withheld = [t for t in broken if t["name"] in SYSTEM_TOPICS]
     orphans = broken if include_system else [t for t in broken if t["name"] not in SYSTEM_TOPICS]
+    latched = [t for t in ordered if t["health"] == "state"]
     return {
         "ros_distro": distro,
         "rmw": rmw,
@@ -221,6 +244,7 @@ def parse_graph(text: str, *, include_system: bool = False) -> dict:
             "topics": len(ordered),
             "orphans": len(orphans),
             "system_excluded": 0 if include_system else len(withheld),
+            "latched": len(latched),
         },
         "orphans": [{"name": t["name"], "type": t["type"], "health": t["health"],
                      "detail": t["health_text"],
@@ -241,6 +265,8 @@ def _classify(entry: dict) -> tuple[str, str]:
     if subs > 0 and pubs == 0:
         return "dead_input", HEALTH_TEXT["dead_input"]
     if pubs > 0 and subs == 0:
+        if str(entry.get("durability") or "").upper() in LATCHED_DURABILITY:
+            return "state", HEALTH_TEXT["state"]
         return "dead_output", HEALTH_TEXT["dead_output"]
     return "live", HEALTH_TEXT["live"]
 
