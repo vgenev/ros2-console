@@ -13,7 +13,6 @@ import shlex
 from .transport import Result, Target, ensure_complete, run
 
 TOPIC_RE = re.compile(r"^/[A-Za-z0-9_/]+$")
-_NUM = re.compile(r"(?:average rate|min|max|std dev|window):\s*([0-9.]+)", re.I)
 
 # Housekeeping. Each one keeps its real health on the topic list. The orphan
 # list omits them unless the caller asks, because a quiet log topic is not a
@@ -624,30 +623,6 @@ def rate(target: Target, topic: str, seconds: int = 6, window: int = 30) -> tupl
             "(run ros2_graph and check the publisher count) or its QoS does not match"
         )
     return data, result
-
-
-# -------------------------------------------------------------------------- sample
-
-def sample(target: Target, topic: str, seconds: int = 6) -> tuple[dict, Result]:
-    topic = validate_topic(topic)
-    seconds = max(2, min(20, int(seconds)))
-    script = (
-        f"timeout {seconds} ros2 topic echo --once --no-arr --truncate-length 80 "
-        f"{shlex.quote(topic)} 2>&1 | head -100"
-    )
-    result = run(target, script, timeout=seconds + 8, label=f"sample {topic}")
-    text = (result.stdout or "").strip()
-    body = "\n".join(
-        line for line in text.splitlines()
-        if line.strip() and "truncated" not in line.lower()
-    )
-    return {
-        "topic": topic,
-        "received": bool(body) and not body.startswith("WARNING"),
-        "message": body[:4000],
-        "bytes": len(body),
-        "hint": None if body else "nothing published in the window; check the publisher count first",
-    }, result
 
 
 # -------------------------------------------------------------------------- camera

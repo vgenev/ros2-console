@@ -56,8 +56,6 @@ def _call(fn, args: dict, ctx=None) -> str:
 # ------------------------------------------------------------------------- handlers
 
 def _host_status(args, ctx=None):
-    def work(target, a):
-        return obs.host_status(target)
     return _call(lambda t, a: obs.host_status(t), args, ctx)
 
 
