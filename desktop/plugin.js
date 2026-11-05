@@ -62,20 +62,34 @@ function targetLabel(settings) {
 
 function OrphanBanner({ graph }) {
   const orphans = (graph && graph.orphans) || []
-  if (!orphans.length) return null
+  const counts = (graph && graph.counts) || {}
+  const count = counts.orphans != null ? counts.orphans : orphans.length
+  const excluded = counts.system_excluded || 0
+  if (!count && !excluded) return null
   const named = orphans
     .slice(0, 3)
     .map((item) => item.name + ' (' + item.health + ')')
     .join(', ')
   const more = orphans.length > 3 ? ' +' + (orphans.length - 3) : ''
-  return jsx('div', {
+  const headline = named
+    ? 'Disconnected: ' + count + '. ' + named + more
+    : 'Disconnected: ' + count
+  return jsxs('div', {
     style: {
       background: '#3a2a12',
       color: '#e6b35a',
       padding: '6px 8px',
       marginBottom: '8px',
     },
-    children: 'Disconnected: ' + named + more,
+    children: [
+      headline,
+      excluded
+        ? jsx('div', {
+            style: { marginTop: '4px', color: 'var(--ui-text-tertiary)' },
+            children: 'System topics were not counted.',
+          })
+        : null,
+    ],
   })
 }
 

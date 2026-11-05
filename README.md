@@ -13,7 +13,7 @@ hermes plugins install OWNER/ros2-console
 ## Tools
 
 - `ros2_host_status` checks that the target answers, and reports the distro, middleware, hostname, uptime, and node and topic counts.
-- `ros2_graph` lists nodes and topics with publisher and subscriber counts, and flags `dead_input` and `dead_output`.
+- `ros2_graph` lists nodes and topics with publisher and subscriber counts, and flags `dead_input` and `dead_output`. `/rosout`, `/rosout_agg`, `/parameter_events`, and `/clock` stay in that list with their real health. They are left out of the orphan count unless you pass `include_system`. `counts.system_excluded` is how many were left out.
 - `ros2_topic_rate` measures a topic's rate in Hz over a short window. A topic with no messages returns 0 Hz and `silent` true.
 - `ros2_topic_sample` reads one message as short YAML, with arrays omitted and long strings cut.
 - `ros2_camera_snapshot` saves one `sensor_msgs/CompressedImage` frame as a JPEG on the machine running Hermes.
@@ -31,7 +31,7 @@ Defaults come from `plugin.yaml`.
 
 ## Pane
 
-Hermes Desktop opens a pane titled **ROS 2** on the right, 360 pixels wide. The header shows the target, the distro, and the time of the last refresh. **Refresh** loads the graph once. **Poll** repeats that load every 5 seconds, and it stays off until you turn it on. A banner names up to three topics whose health is `dead_input` or `dead_output`. The status bar shows the orphan count. **Grab frame** loads the camera topic. That topic defaults to `/camera/image_raw/compressed`, and the pane remembers a change.
+Hermes Desktop opens a pane titled **ROS 2** on the right, 360 pixels wide. The header shows the target, the distro, and the time of the last refresh. **Refresh** loads the graph once. **Poll** repeats that load every 5 seconds, and it stays off until you turn it on. A banner shows the orphan count and names up to three topics whose health is `dead_input` or `dead_output`. When housekeeping topics were left out, a second line says they were not counted. The status bar shows the same orphan count. **Grab frame** loads the camera topic. That topic defaults to `/camera/image_raw/compressed`, and the pane remembers a change.
 
 ## Safety
 

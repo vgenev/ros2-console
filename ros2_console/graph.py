@@ -15,6 +15,16 @@ from .transport import Result, Target, run
 TOPIC_RE = re.compile(r"^/[A-Za-z0-9_/]+$")
 _NUM = re.compile(r"(?:average rate|min|max|std dev|window):\s*([0-9.]+)", re.I)
 
+# Housekeeping. Each one keeps its real health on the topic list. The orphan
+# list omits them unless the caller asks, because a quiet log topic is not a
+# broken robot.
+SYSTEM_TOPICS = frozenset({
+    "/clock",
+    "/parameter_events",
+    "/rosout",
+    "/rosout_agg",
+})
+
 
 def validate_topic(topic: str) -> str:
     """Topic names are interpolated into a remote shell, so they are checked first."""
@@ -75,7 +85,7 @@ def _split_sections(text: str) -> dict[str, list[str]]:
     return sections
 
 
-def parse_graph(text: str) -> dict:
+def parse_graph(text: str, *, include_system: bool = False) -> dict:
     sections = _split_sections(text)
     head = sections.get("head") or []
     distro = head[0].strip() if head else "unknown"
@@ -108,7 +118,9 @@ def parse_graph(text: str) -> dict:
         entry["health"], entry["health_text"] = _classify(entry)
 
     ordered = sorted(topics.values(), key=lambda t: t["name"])
-    orphans = [t for t in ordered if t["health"] in ("dead_input", "dead_output")]
+    broken = [t for t in ordered if t["health"] in ("dead_input", "dead_output")]
+    withheld = [t for t in broken if t["name"] in SYSTEM_TOPICS]
+    orphans = broken if include_system else [t for t in broken if t["name"] not in SYSTEM_TOPICS]
     return {
         "ros_distro": distro,
         "rmw": rmw,
@@ -118,6 +130,7 @@ def parse_graph(text: str) -> dict:
             "nodes": len(nodes),
             "topics": len(ordered),
             "orphans": len(orphans),
+            "system_excluded": 0 if include_system else len(withheld),
         },
         "orphans": [{"name": t["name"], "type": t["type"], "health": t["health"],
                      "detail": t["health_text"],
@@ -142,11 +155,11 @@ def _classify(entry: dict) -> tuple[str, str]:
     return "live", HEALTH_TEXT["live"]
 
 
-def graph(target: Target) -> tuple[dict | None, Result]:
+def graph(target: Target, *, include_system: bool = False) -> tuple[dict | None, Result]:
     result = run(target, GRAPH_SCRIPT, timeout=max(target.timeout, 20), label="graph")
     if not result.ok and "@@END" not in result.stdout:
         return None, result
-    return parse_graph(result.stdout), result
+    return parse_graph(result.stdout, include_system=include_system), result
 
 
 # ---------------------------------------------------------------------------- rate

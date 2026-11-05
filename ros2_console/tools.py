@@ -55,8 +55,9 @@ def _host_status(args, ctx=None):
 
 def _graph(args, ctx=None):
     target = _target(args, ctx)
+    include_system = bool((args or {}).get("include_system"))
     try:
-        data, result = obs.graph(target)
+        data, result = obs.graph(target, include_system=include_system)
     except ValueError as exc:
         return json.dumps({"ok": False, "error": str(exc)})
     if data is None:
@@ -172,13 +173,17 @@ _TOOLS = [
                 "subscriber counts, plus health flags. Flags topics that are structurally "
                 "disconnected — 'dead_input' (subscribers but no publisher, so consumers wait "
                 "forever) and 'dead_output' (publishers but no subscriber, so results are "
-                "discarded). Use it before guessing why a robot misbehaves."
+                "discarded). /rosout, /rosout_agg, /parameter_events, and /clock stay in the "
+                "topic list with their real health and are left out of orphans unless "
+                "include_system is true. Use it before guessing why a robot misbehaves."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "all_topics": {"type": "boolean",
                                    "description": "Return every topic, not just the live ones (default false)."},
+                    "include_system": {"type": "boolean",
+                                       "description": "Count ROS housekeeping topics as orphans (default false)."},
                     "host": {"type": "string", "description": "Override the SSH target for this call."},
                     "distro": {"type": "string", "description": "Override the ROS 2 distro."},
                 },

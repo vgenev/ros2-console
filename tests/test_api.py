@@ -77,7 +77,7 @@ def test_graph_reports_the_transport_error(client, monkeypatch):
 
 
 def test_graph_includes_orphans(client, monkeypatch):
-    def fake_graph(target):
+    def fake_graph(target, include_system=False):
         return {
             "ros_distro": "jazzy",
             "nodes": ["/talker"],
