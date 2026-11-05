@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -33,10 +34,15 @@ def test_chatter_rate_is_about_ten_hertz():
 
 
 def test_depth_topic_is_silent_without_a_publisher():
+    started = time.monotonic()
     data = _call(_topic_rate, "/depth/points/compressed", 5)
+    elapsed = time.monotonic() - started
     assert data["hz"] == 0
     assert data["silent"] is True
     assert "missing publisher" in data["hint"]
+    assert "/depth/points/compressed" in data["hint"]
+    assert "unpublished" in data["hint"]
+    assert elapsed < 3
 
 
 def test_chatter_sample_contains_hello_world():

@@ -152,10 +152,24 @@ def graph(target: Target) -> tuple[dict | None, Result]:
 # ---------------------------------------------------------------------------- rate
 
 def _rate_script(topic: str, seconds: int, window: int) -> str:
+    # `ros2 topic hz` ignores SIGTERM, so a plain `timeout N` never returns.
     return (
-        f"timeout {int(seconds)} ros2 topic hz --window {int(window)} "
+        f"timeout -s KILL {int(seconds)} ros2 topic hz --window {int(window)} "
         f"{shlex.quote(topic)} 2>&1 | tail -8"
     )
+
+
+def _info_script(topic: str) -> str:
+    return f"ros2 topic info {shlex.quote(topic)} 2>&1"
+
+
+def _publisher_count(text: str) -> int | None:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Publisher count:"):
+            raw = stripped.split(":", 1)[1].strip()
+            return int(raw) if raw.isdigit() else None
+    return None
 
 
 def parse_rate(text: str) -> dict:
@@ -180,13 +194,29 @@ def parse_rate(text: str) -> dict:
             "raw_tail": tail}
 
 
+def _unpublished(topic: str) -> dict:
+    return {
+        "hz": 0.0,
+        "samples": 0,
+        "silent": True,
+        "stats": {},
+        "raw_tail": [],
+        "topic": topic,
+        "measured_seconds": 0,
+        "hint": f"missing publisher: {topic} is unpublished",
+    }
+
+
 def rate(target: Target, topic: str, seconds: int = 6, window: int = 50) -> tuple[dict, Result]:
     topic = validate_topic(topic)
     seconds = max(3, min(20, int(seconds)))
+    info = run(target, _info_script(topic), timeout=5, label=f"info {topic}")
+    if _publisher_count(info.stdout or "") == 0:
+        return _unpublished(topic), info
     result = run(target, _rate_script(topic, seconds, window), timeout=seconds + 8,
                  label=f"rate {topic}")
-    # `timeout` exits 124 by design once the measured window closes.
-    data = parse_rate(result.stdout or result.stderr)
+    # Empty stdout is silent even when SSH wrote a warning on stderr.
+    data = parse_rate(result.stdout or "")
     data["topic"] = topic
     data["measured_seconds"] = seconds
     if data["silent"] and "hint" not in data:
