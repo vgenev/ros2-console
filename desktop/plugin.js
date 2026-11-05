@@ -221,7 +221,7 @@ function Legend() {
   })
 }
 
-function Topology({ graph, onHover, onLeave }) {
+function Topology({ graph, onHover, onLeave, onPin }) {
   const edges = (graph && graph.edges) || []
   const topics = (graph && graph.topics) || []
   if (!edges.length) {
@@ -303,7 +303,8 @@ function Topology({ graph, onHover, onLeave }) {
             return jsxs('g', {
               onMouseEnter: (ev) => onHover && onHover(t, ev),
               onMouseLeave: () => onLeave && onLeave(),
-              style: { cursor: 'help' },
+              onClick: (ev) => onPin && onPin(t, ev),
+              style: { cursor: 'pointer' },
               children: [
                 jsx('circle', {
                   cx: String(LANE_R + 6),
@@ -328,7 +329,7 @@ function Topology({ graph, onHover, onLeave }) {
   })
 }
 
-function GraphTable({ graph, onHover, onLeave }) {
+function GraphTable({ graph, onHover, onLeave, onPin }) {
   const topics = (graph && graph.topics) || []
   if (!topics.length) return jsx('p', { children: 'No topics on this target.' })
   return jsxs('table', {
@@ -354,7 +355,8 @@ function GraphTable({ graph, onHover, onLeave }) {
           jsxs('tr', {
             onMouseEnter: (ev) => onHover && onHover(topic.name, ev),
             onMouseLeave: () => onLeave && onLeave(),
-            style: { cursor: 'help' },
+            onClick: (ev) => onPin && onPin(topic.name, ev),
+            style: { cursor: 'pointer' },
             children: [
               jsx('td', { style: { padding: '2px 6px' }, children: topic.name }),
               jsx('td', {
@@ -391,72 +393,163 @@ function GraphTable({ graph, onHover, onLeave }) {
   })
 }
 
-function TopicTip({ tip }) {
+// ROS messages of type String usually carry JSON (a status blob, a screen of
+// state). Pretty-printing it is the difference between a wall of text and
+// something you can read, and it is what gets copied.
+function prettyPayload(raw) {
+  if (!raw) return ''
+  let text = String(raw)
+  const repr = text.match(/^[A-Za-z0-9_.]*String\(data=(?:'([\s\S]*)'|"([\s\S]*)")?\)$/)
+  if (repr) text = repr[1] != null ? repr[1] : repr[2] || ''
+  const trimmed = text.trim()
+  if (!/^[[{]/.test(trimmed)) return text
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2)
+  } catch (err) {
+    return text
+  }
+}
+
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch (err) {
+    /* fall through to the textarea path */
+  }
+  try {
+    const area = document.createElement('textarea')
+    area.value = text
+    area.style.position = 'fixed'
+    area.style.opacity = '0'
+    document.body.appendChild(area)
+    area.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(area)
+    return ok
+  } catch (err) {
+    return false
+  }
+}
+
+function TopicTip({ tip, onClose }) {
+  const [copied, setCopied] = useState(false)
   const data = tip.data
   const rawError = tip.error || ''
   const error =
     /404/.test(rawError)
       ? 'This route is not loaded yet — the gateway is running an older plugin build; restart it to enable hover samples.'
       : rawError
-  const body = tip.loading
+  const payload = tip.loading
     ? 'reading one message…'
     : error
       ? error
       : data
         ? data.received
-          ? data.message
+          ? prettyPayload(data.message)
           : data.hint || 'No message arrived in the window.'
         : ''
   const label = { color: '#96a0ae', fontSize: '11px' }
+
+  async function onCopy() {
+    const ok = await copyText(payload)
+    if (ok) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1400)
+    }
+  }
+
+  const button = {
+    type: 'button',
+    onClick: onCopy,
+    style: {
+      background: copied ? 'rgba(79, 169, 126, 0.22)' : 'rgba(255, 255, 255, 0.08)',
+      border: '1px solid rgba(255, 255, 255, 0.16)',
+      color: copied ? '#8fd0ac' : '#dfe6ef',
+      borderRadius: '5px',
+      padding: '2px 8px',
+      fontSize: '11px',
+      cursor: 'pointer',
+      fontFamily: 'inherit',
+    },
+  }
+
   return jsxs('div', {
     style: {
       position: 'fixed',
       left: tip.x + 'px',
       top: tip.y + 'px',
       zIndex: 9999,
-      width: '460px',
+      width: '520px',
       padding: '10px 12px',
       borderRadius: '7px',
       border: '1px solid rgba(255, 255, 255, 0.16)',
       background: '#11151c',
       color: '#eef2f8',
       boxShadow: '0 12px 34px rgba(0, 0, 0, 0.55)',
-      pointerEvents: 'none',
+      pointerEvents: tip.pinned ? 'auto' : 'none',
       fontSize: '12px',
       lineHeight: '1.5',
     },
     children: [
-      jsx('div', {
-        style: {
-          fontFamily: 'ui-monospace, monospace',
-          fontWeight: 700,
-          fontSize: '12.5px',
-          color: '#ffffff',
-          marginBottom: '3px',
-          wordBreak: 'break-all',
-        },
-        children: tip.topic,
-      }, 'head'),
+      jsxs('div', {
+        style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' },
+        children: [
+          jsx('span', {
+            style: {
+              fontFamily: 'ui-monospace, monospace',
+              fontWeight: 700,
+              fontSize: '12.5px',
+              color: '#ffffff',
+              wordBreak: 'break-all',
+              flex: '1 1 auto',
+            },
+            children: tip.topic,
+          }, 'name'),
+          tip.pinned
+            ? jsx('button', button, 'copy')
+            : jsx('span', { style: { color: '#96a0ae', fontSize: '10.5px' }, children: 'click to pin' }, 'hint'),
+          tip.pinned
+            ? jsx('button', {
+                type: 'button',
+                onClick: onClose,
+                style: {
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#96a0ae',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  lineHeight: '1',
+                  padding: '0 2px',
+                },
+                children: '×',
+              }, 'close')
+            : null,
+        ],
+      }),
       data && data.type
         ? jsx('div', { style: label, children: 'type: ' + data.type }, 'type')
         : null,
       data && data.stamp
         ? jsx('div', { style: label, children: 'stamp: ' + data.stamp }, 'stamp')
         : null,
-      jsx('div', {
+      jsx('pre', {
         style: {
-          marginTop: '7px',
-          paddingTop: '7px',
+          margin: '7px 0 0',
+          padding: '7px 0 0',
           borderTop: '1px solid rgba(255, 255, 255, 0.10)',
           fontFamily: 'ui-monospace, monospace',
-          fontSize: '12px',
+          fontSize: '11.5px',
+          lineHeight: '1.5',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
-          maxHeight: '180px',
-          overflow: 'hidden',
+          maxHeight: tip.pinned ? '320px' : '180px',
+          overflow: 'auto',
           color: error ? '#f0a5a5' : '#dfe6ef',
         },
-        children: body,
+        children: payload,
       }, 'body'),
     ],
   })
@@ -542,7 +635,23 @@ function Pane({ ctx, bus }) {
     }
   }
 
-  function onHover(topicName, event) {
+  useEffect(() => {
+    if (!tip || !tip.pinned) return undefined
+    const onKey = (ev) => {
+      if (ev.key === 'Escape') setTip(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [tip])
+
+  function onPin(topicName, event) {
+    // Clicking pins the card so the pointer can travel into it and hit Copy; a
+    // hover card with pointerEvents:none can never be interacted with.
+    onHover(topicName, event, true)
+  }
+
+  function onHover(topicName, event, pin) {
+    if (!pin && tip && tip.pinned) return
     const winW = typeof window !== 'undefined' ? window.innerWidth || 1200 : 1200
     const winH = typeof window !== 'undefined' ? window.innerHeight || 800 : 800
     const x = Math.max(8, Math.min(event.clientX + 18, winW - 480))
@@ -552,13 +661,17 @@ function Pane({ ctx, bus }) {
     const y = below + 240 > winH ? Math.max(8, event.clientY - 250) : below
     const hit = SAMPLE_CACHE.get(topicName)
     if (hit && Date.now() - hit.at < 30000) {
-      setTip({ topic: topicName, data: hit.data, x: x, y: y })
+      setTip({ topic: topicName, data: hit.data, x: x, y: y, pinned: !!pin })
       return
     }
-    setTip({ topic: topicName, loading: true, x: x, y: y })
+    setTip({ topic: topicName, loading: true, x: x, y: y, pinned: !!pin })
     loadSample(ctx, topicName)
       .then((data) =>
-        setTip((cur) => (cur && cur.topic === topicName ? { topic: topicName, data: data, x: x, y: y } : cur))
+        setTip((cur) =>
+          cur && cur.topic === topicName
+            ? { topic: topicName, data: data, x: x, y: y, pinned: cur.pinned }
+            : cur
+        )
       )
       .catch((err) =>
         setTip((cur) =>
@@ -570,7 +683,7 @@ function Pane({ ctx, bus }) {
   }
 
   function onLeave() {
-    setTip(null)
+    setTip((cur) => (cur && cur.pinned ? cur : null))
   }
 
   async function grab() {
@@ -697,8 +810,18 @@ function Pane({ ctx, bus }) {
       jsx(OrphanBanner, { graph: snap.graph }),
       snap.graph
         ? view === 'topology'
-          ? jsx(Topology, { graph: snap.graph, onHover: onHover, onLeave: onLeave })
-          : jsx(GraphTable, { graph: snap.graph, onHover: onHover, onLeave: onLeave })
+          ? jsx(Topology, {
+              graph: snap.graph,
+              onHover: onHover,
+              onLeave: onLeave,
+              onPin: onPin,
+            })
+          : jsx(GraphTable, {
+              graph: snap.graph,
+              onHover: onHover,
+              onLeave: onLeave,
+              onPin: onPin,
+            })
         : snap.error
           ? null
           : jsx('p', { children: 'Waiting for the graph.' }),
@@ -735,7 +858,7 @@ function Pane({ ctx, bus }) {
             ? null
             : jsx('p', { children: 'No frame yet.' }),
       ] }),
-      tip ? jsx(TopicTip, { tip: tip }) : null,
+      tip ? jsx(TopicTip, { tip: tip, onClose: () => setTip(null) }) : null,
     ],
   })
 }

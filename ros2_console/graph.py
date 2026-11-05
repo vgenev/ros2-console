@@ -664,11 +664,17 @@ if msg_type.endswith("/Image") and hasattr(msg, "height"):
     body = "%dx%d encoding=%s step=%d frame=%s" % (msg.height, msg.width, msg.encoding, msg.step, frame)
 elif msg_type.endswith("/CompressedImage"):
     body = "%s %d bytes frame=%s" % (getattr(msg, "format", "?"), len(getattr(msg, "data", b"") or b""), frame)
+elif msg_type.endswith("/String"):
+    # Hand back the payload itself: repr() would wrap it as
+    # String(data='...') and make JSON unreadable and uncopyable.
+    body = str(msg.data)
 else:
     body = repr(msg)
+
 print("@@TYPE %s" % msg_type)
 print("@@STAMP %s" % stamp)
-print("@@MSG %s" % " ".join(body.split())[:1200])
+limit = 20000 if msg_type.endswith("/String") else 1200
+print("@@MSG %s" % " ".join(body.split())[:limit])
 '''
 
 
