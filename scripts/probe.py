@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
 
 from ros2_console.graph import graph, host_status
 from ros2_console.settings import resolve
-from ros2_console.tools import _topic_rate, _topic_sample
+from ros2_console.tools import _camera_snapshot, _topic_rate, _topic_sample
 from ros2_console.transport import Target
 
 
@@ -58,7 +58,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--rate", action="append", default=[], help="Topic to measure with ros2_topic_rate.")
     parser.add_argument("--sample", action="append", default=[], help="Topic to read with ros2_topic_sample.")
-    parser.add_argument("--seconds", type=int, default=5, help="Window for --rate and --sample.")
+    parser.add_argument("--snapshot", action="append", default=[], help="Compressed image topic to save.")
+    parser.add_argument("--seconds", type=int, default=5, help="Window for --rate, --sample, and --snapshot.")
     args = parser.parse_args(argv)
     payload = probe(args.target)
     if args.rate or args.sample:
@@ -68,6 +69,10 @@ def main(argv: list[str] | None = None) -> int:
         ]
         payload["samples"] = [
             json.loads(_topic_sample(_tool_args(topic, target, args.seconds))) for topic in args.sample
+        ]
+        payload["snapshots"] = [
+            json.loads(_camera_snapshot(_tool_args(topic, target, args.seconds)))
+            for topic in args.snapshot
         ]
     json.dump(payload, sys.stdout, default=str)
     sys.stdout.write("\n")

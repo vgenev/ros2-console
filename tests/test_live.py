@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
-from ros2_console.tools import _topic_rate, _topic_sample
+from ros2_console.tools import _camera_snapshot, _topic_rate, _topic_sample
 
 pytestmark = pytest.mark.live
 
@@ -48,3 +49,36 @@ def test_sample_of_a_silent_topic_returns_an_error():
     data = _call(_topic_sample, "/depth/points/compressed", 4)
     assert data["received"] is False
     assert data["error"]
+
+
+@pytest.fixture
+def frame_dir(tmp_path, monkeypatch):
+    def fake_frame_path(topic: str) -> Path:
+        slug = topic.strip("/").replace("/", "_") or "frame"
+        return tmp_path / f"{slug}.jpg"
+
+    monkeypatch.setattr("ros2_console.tools._frame_path", fake_frame_path)
+    return tmp_path
+
+
+def test_camera_snapshot_writes_a_jpeg(frame_dir):
+    data = _call(_camera_snapshot, "/camera/image_raw/compressed", 6)
+    assert data["ok"] is True
+    assert data["format"] == "jpeg"
+    assert data["stamp"]
+    assert data["bytes"] > 8000
+    path = Path(data["path"])
+    assert path.is_file()
+    assert path.parent == frame_dir
+    raw = path.read_bytes()
+    assert raw[:3] == b"\xff\xd8\xff"
+    assert len(raw) > 8000
+    assert len(raw) == data["bytes"]
+
+
+def test_snapshot_of_a_non_image_topic_writes_nothing(frame_dir):
+    data = _call(_camera_snapshot, "/chatter", 4)
+    assert data["ok"] is False
+    assert "CompressedImage" in data["error"]
+    assert "Traceback" not in data["error"]
+    assert list(frame_dir.iterdir()) == []
