@@ -29,6 +29,23 @@ Defaults come from `plugin.yaml`.
 | `setup` | empty | Extra setup file to source after the distro, for custom message types. |
 | `timeout` | `15` | Per-command timeout in seconds. Values are clamped to 5 through 120. |
 
+## Bundled skills
+
+The plugin ships three read-only skills that carry the triage discipline its tools assume. They load
+on demand as `ros2-console:<name>`:
+
+| Skill | Use it when |
+|---|---|
+| `ros2-console:ros2-graph-triage` | a topic is silent, a rate reads wrong, or a node looks alive but does nothing |
+| `ros2-console:ros2-camera-and-images` | a camera topic is empty, a snapshot fails, or image bandwidth matters |
+| `ros2-console:ros2-edge-node-ops` | running or restarting nodes on an edge device over SSH |
+
+Every claim in them that could be measured was: the QoS incompatibility that silently starves a
+`RELIABLE` subscriber, the measurement window that makes a 10 Hz topic read 6.3 Hz, and the bandwidth
+table are all reproduced in `demo/`. If your Hermes build does not surface plugin skills, they are
+plain directories — copy any of `skills/<name>/` into `~/.hermes/skills/` and it behaves as an
+ordinary skill.
+
 ## Pane
 
 Hermes Desktop opens a pane titled **ROS 2** on the right, 360 pixels wide. The header shows the target, the distro, and the time of the last refresh. The target field under the header sets the SSH target from inside the pane (type it, press **Set target** or Enter) and saves it as the plugin's `host` setting, so a freshly installed plugin needs no config editing. **Refresh** loads the graph once. **Poll** repeats that load every 5 seconds, and it stays off until you turn it on. A banner shows the orphan count and names up to three topics whose health is `dead_input` or `dead_output`. When housekeeping topics were left out, a second line says they were not counted. The status bar shows the same orphan count. **Grab frame** loads the camera topic. That topic defaults to `/camera/image_raw/compressed`, and the pane remembers a change.
