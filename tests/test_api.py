@@ -126,6 +126,26 @@ def test_camera_success_is_a_data_url(client, monkeypatch):
     assert body["data_url"] == "data:image/jpeg;base64,aGVsbG8="
 
 
+def test_camera_accepts_a_host_override(client, monkeypatch):
+    """A regression that shipped once: the route ignored `host`, so the pane
+    silently fell back to local mode and every camera call failed on a real robot."""
+    seen = {}
+
+    def fake_snapshot(target, topic, seconds=8):
+        seen["host"] = target.host
+        seen["mode"] = target.mode
+        return {"topic": topic, "ok": True, "data": "aGVsbG8=", "format": "jpeg",
+                "bytes": 5, "stamp": "1.0"}, Result(ok=True)
+
+    monkeypatch.setattr("ros2_console.graph.snapshot", fake_snapshot)
+    body = client.get(
+        f"{PREFIX}/camera",
+        params={"topic": "/camera/image_raw/compressed", "host": "robot@10.0.0.5"},
+    ).json()
+    assert body["ok"] is True
+    assert seen == {"host": "robot@10.0.0.5", "mode": "ssh"}
+
+
 def test_plugin_api_module_exports_the_router():
     spec = importlib.util.spec_from_file_location(
         "ros2_console_plugin_api_under_test", "dashboard/plugin_api.py"

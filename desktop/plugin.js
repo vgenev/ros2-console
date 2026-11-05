@@ -159,6 +159,37 @@ function Pane({ ctx, bus }) {
   const [frame, setFrame] = useState(null)
   const [frameError, setFrameError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [hostDraft, setHostDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+
+  // The pane is useless without a target, and an installed user should not have to
+  // hand-edit config.yaml to name their robot. Seed once from the saved settings.
+  useEffect(() => {
+    if (snap.settings && !hostDraft) setHostDraft(snap.settings.host || '')
+  }, [snap.settings])
+
+  async function save() {
+    const base = snap.settings || {}
+    setSaving(true)
+    setSaveError('')
+    try {
+      await ctx.rest('/settings', {
+        method: 'POST',
+        body: {
+          host: hostDraft.trim(),
+          distro: base.distro || 'jazzy',
+          setup: base.setup || '',
+          timeout: base.timeout || 15,
+        },
+      })
+      await bus.refresh()
+    } catch (err) {
+      setSaveError(err && err.message ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   function onTopic(event) {
     const next = event.target.value
@@ -209,6 +240,42 @@ function Pane({ ctx, bus }) {
           }),
         ],
       }),
+      jsxs('div', {
+        style: { display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px' },
+        children: [
+          jsx('input', {
+            type: 'text',
+            value: hostDraft,
+            placeholder: 'user@host or ssh alias (empty = this machine)',
+            onChange: (event) => setHostDraft(event.target.value),
+            onKeyDown: (event) => {
+              if (event.key === 'Enter') save()
+            },
+            style: {
+              flex: 1,
+              minWidth: 0,
+              padding: '2px 6px',
+              font: 'inherit',
+              color: 'inherit',
+              background: 'transparent',
+              border: '1px solid var(--ui-stroke-secondary, #8884)',
+              borderRadius: '4px',
+            },
+          }),
+          jsx('button', {
+            type: 'button',
+            disabled: saving,
+            onClick: () => save(),
+            children: saving ? 'Saving…' : 'Set target',
+          }),
+        ],
+      }),
+      saveError
+        ? jsx('div', {
+            style: { color: 'var(--ui-error-foreground, #ff6b6b)', marginBottom: '6px' },
+            children: saveError,
+          })
+        : null,
       jsxs('div', {
         style: { display: 'flex', gap: '6px', marginBottom: '8px' },
         children: [

@@ -94,11 +94,13 @@ def get_graph(host: str = "", distro: str = "") -> dict:
 
 
 @router.get("/camera")
-def get_camera(topic: str = "") -> dict:
+def get_camera(topic: str = "", host: str = "", distro: str = "") -> dict:
     if not topic:
         return {"ok": False, "topic": topic, "error": "topic is required"}
     try:
-        data, result = obs.snapshot(_target_from("", ""), topic)
+        # `host`/`distro` mirror /graph: the pane may target a host the saved
+        # settings do not name yet (a new robot on the bench).
+        data, result = obs.snapshot(_target_from(host, distro), topic)
     except Exception as exc:
         return {"ok": False, "topic": topic, "error": str(exc)}
     if not data.get("ok"):
