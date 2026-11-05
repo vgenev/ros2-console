@@ -3,6 +3,7 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 import { ROUTES_AREA, SIDEBAR_NAV_AREA } from '@hermes/plugin-sdk'
 
 const DEFAULT_TOPIC = '/camera/image_raw/compressed'
+
 // A read costs 11-12s on the board, so polling has to be slower than a read;
 // anything faster only queues work and repaints.
 const POLL_MS = 15000
@@ -49,6 +50,18 @@ function useStore() {
 
 function clock() {
   return new Date().toLocaleTimeString()
+}
+
+// A sample costs 4-6s of SSH, so a hover must not re-fetch the same topic in a
+// loop while the pointer wanders across the graph.
+const SAMPLE_CACHE = new Map()
+
+async function loadSample(ctx, topic) {
+  const hit = SAMPLE_CACHE.get(topic)
+  if (hit && Date.now() - hit.at < 30000) return hit.data
+  const data = await ctx.rest('/sample?seconds=3&topic=' + encodeURIComponent(topic))
+  SAMPLE_CACHE.set(topic, { at: Date.now(), data })
+  return data
 }
 
 async function refresh(ctx) {
@@ -194,7 +207,7 @@ function Legend() {
   })
 }
 
-function Topology({ graph }) {
+function Topology({ graph, onHover, onLeave }) {
   const edges = (graph && graph.edges) || []
   const topics = (graph && graph.topics) || []
   if (!edges.length) {
@@ -274,6 +287,9 @@ function Topology({ graph }) {
           ...topicList.map((t) => {
             const h = health.get(t)
             return jsxs('g', {
+              onMouseEnter: (ev) => onHover && onHover(t, ev),
+              onMouseLeave: () => onLeave && onLeave(),
+              style: { cursor: 'help' },
               children: [
                 jsx('circle', {
                   cx: String(LANE_R + 6),
@@ -298,7 +314,7 @@ function Topology({ graph }) {
   })
 }
 
-function GraphTable({ graph }) {
+function GraphTable({ graph, onHover, onLeave }) {
   const topics = (graph && graph.topics) || []
   if (!topics.length) return jsx('p', { children: 'No topics on this target.' })
   return jsxs('table', {
@@ -322,6 +338,9 @@ function GraphTable({ graph }) {
       jsx('tbody', {
         children: topics.map((topic) =>
           jsxs('tr', {
+            onMouseEnter: (ev) => onHover && onHover(topic.name, ev),
+            onMouseLeave: () => onLeave && onLeave(),
+            style: { cursor: 'help' },
             children: [
               jsx('td', { style: { padding: '2px 6px' }, children: topic.name }),
               jsx('td', {
@@ -358,6 +377,61 @@ function GraphTable({ graph }) {
   })
 }
 
+function TopicTip({ tip }) {
+  const data = tip.data
+  const body = tip.loading
+    ? 'reading one message…'
+    : tip.error
+      ? tip.error
+      : data
+        ? data.received
+          ? data.message
+          : data.hint || 'no message arrived in the window'
+        : ''
+  return jsxs('div', {
+    style: {
+      position: 'fixed',
+      left: tip.x + 'px',
+      top: tip.y + 'px',
+      zIndex: 9999,
+      width: '450px',
+      padding: '8px 10px',
+      borderRadius: '6px',
+      border: '1px solid var(--ui-stroke-secondary, #8884)',
+      background: 'var(--ui-bg-secondary, #14161c)',
+      color: 'var(--ui-text-primary, #e6e6e6)',
+      boxShadow: '0 8px 28px #0006',
+      pointerEvents: 'none',
+      fontSize: '11px',
+      lineHeight: '1.45',
+    },
+    children: [
+      jsx('div', {
+        style: { fontFamily: 'ui-monospace, monospace', fontWeight: 600, marginBottom: '2px' },
+        children: tip.topic,
+      }, 'head'),
+      data && data.type
+        ? jsx('div', { style: { color: 'var(--ui-text-tertiary)' }, children: 'type: ' + data.type }, 'type')
+        : null,
+      data && data.stamp
+        ? jsx('div', { style: { color: 'var(--ui-text-tertiary)' }, children: 'stamp: ' + data.stamp }, 'stamp')
+        : null,
+      jsx('div', {
+        style: {
+          marginTop: '6px',
+          fontFamily: 'ui-monospace, monospace',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          maxHeight: '180px',
+          overflow: 'hidden',
+          color: 'var(--ui-text-secondary)',
+        },
+        children: body,
+      }, 'body'),
+    ],
+  })
+}
+
 function Pane({ ctx, bus }) {
   const snap = useStore()
   const [polling, setPolling] = useState(false)
@@ -376,6 +450,7 @@ function Pane({ ctx, bus }) {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [view, setView] = useState('topology')
+  const [tip, setTip] = useState(null)
 
   // The pane is useless without a target, and an installed user should not have to
   // hand-edit config.yaml to name their robot. Seed once from the saved settings.
@@ -435,6 +510,33 @@ function Pane({ ctx, bus }) {
     } catch (err) {
       /* the field still works for this session */
     }
+  }
+
+  function onHover(topicName, event) {
+    const win = typeof window !== 'undefined' ? window.innerWidth || 1200 : 1200
+    const x = Math.max(8, Math.min(event.clientX + 14, win - 470))
+    const y = event.clientY + 16
+    const hit = SAMPLE_CACHE.get(topicName)
+    if (hit && Date.now() - hit.at < 30000) {
+      setTip({ topic: topicName, data: hit.data, x: x, y: y })
+      return
+    }
+    setTip({ topic: topicName, loading: true, x: x, y: y })
+    loadSample(ctx, topicName)
+      .then((data) =>
+        setTip((cur) => (cur && cur.topic === topicName ? { topic: topicName, data: data, x: x, y: y } : cur))
+      )
+      .catch((err) =>
+        setTip((cur) =>
+          cur && cur.topic === topicName
+            ? { topic: topicName, error: String((err && err.message) || err), x: x, y: y }
+            : cur
+        )
+      )
+  }
+
+  function onLeave() {
+    setTip(null)
   }
 
   async function grab() {
@@ -543,7 +645,7 @@ function Pane({ ctx, bus }) {
               setPolling(next)
               bus.setPolling(next)
             },
-            children: polling ? 'Polling every 5s' : 'Poll',
+            children: polling ? 'Polling every 15s' : 'Poll',
           }),
           jsx('button', {
             type: 'button',
@@ -561,8 +663,8 @@ function Pane({ ctx, bus }) {
       jsx(OrphanBanner, { graph: snap.graph }),
       snap.graph
         ? view === 'topology'
-          ? jsx(Topology, { graph: snap.graph })
-          : jsx(GraphTable, { graph: snap.graph })
+          ? jsx(Topology, { graph: snap.graph, onHover: onHover, onLeave: onLeave })
+          : jsx(GraphTable, { graph: snap.graph, onHover: onHover, onLeave: onLeave })
         : snap.error
           ? null
           : jsx('p', { children: 'Waiting for the graph.' }),
@@ -599,6 +701,7 @@ function Pane({ ctx, bus }) {
             ? null
             : jsx('p', { children: 'No frame yet.' }),
       ] }),
+      tip ? jsx(TopicTip, { tip: tip }) : null,
     ],
   })
 }

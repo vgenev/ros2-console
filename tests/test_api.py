@@ -153,3 +153,34 @@ def test_plugin_api_module_exports_the_router():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert module.router is router
+
+
+def test_sample_route_returns_the_last_message(client, monkeypatch):
+    def fake_sample(target, topic, seconds=3):
+        return ({"topic": topic, "ok": True, "received": True,
+                 "type": "std_msgs/msg/Bool", "stamp": "12.5", "message": "Bool(data=True)"},
+                Result(ok=True))
+
+    monkeypatch.setattr("ros2_console.graph.sample_last", fake_sample)
+    body = client.get(f"{PREFIX}/sample", params={"topic": "/example_cell/alarm"}).json()
+    assert body == {
+        "ok": True,
+        "topic": "/example_cell/alarm",
+        "received": True,
+        "type": "std_msgs/msg/Bool",
+        "stamp": "12.5",
+        "message": "Bool(data=True)",
+        "hint": None,
+    }
+
+
+def test_sample_route_names_an_idle_topic_instead_of_failing(client, monkeypatch):
+    def fake_sample(target, topic, seconds=3):
+        return ({"topic": topic, "ok": True, "received": False, "message": "",
+                 "hint": "nothing arrived in the window"}, Result(ok=True))
+
+    monkeypatch.setattr("ros2_console.graph.sample_last", fake_sample)
+    body = client.get(f"{PREFIX}/sample", params={"topic": "/quiet"}).json()
+    assert body["ok"] is True
+    assert body["received"] is False
+    assert body["hint"] == "nothing arrived in the window"

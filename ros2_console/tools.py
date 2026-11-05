@@ -82,7 +82,10 @@ def _topic_rate(args, ctx=None):
 
 def _topic_sample(args, ctx=None):
     def work(t, a):
-        data, result = obs.sample(t, a["topic"], a.get("seconds", 6))
+        # rclpy with the publisher's QoS, not `ros2 topic echo`: echo subscribes
+        # RELIABLE and therefore sees nothing from a BEST_EFFORT publisher such as
+        # a camera driver.
+        data, result = obs.sample_last(t, a["topic"], a.get("seconds", 6))
         data["ok"] = data["received"]
         if not data["received"]:
             data["error"] = result.error() if not result.ok else "no message in the window"

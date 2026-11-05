@@ -598,7 +598,113 @@ def snapshot(target: Target, topic: str, seconds: int = 8) -> tuple[dict, Result
             **meta}, result
 
 
+# ----------------------------------------------------------------------- sample
+
+SAMPLE_BODY = r'''
+import sys, time
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile
+
+topic, seconds = sys.argv[1], float(sys.argv[2])
+rclpy.init()
+node = Node("hermes_ros2_sample")
+box = {}
+
+types = []
+settle = time.time() + 3.0
+while time.time() < settle and not types:
+    types = dict(node.get_topic_names_and_types()).get(topic, [])
+    rclpy.spin_once(node, timeout_sec=0.15)
+if not types:
+    print("@@ERR topic %s not found on this graph" % topic); sys.exit(3)
+msg_type = types[0]
+try:
+    from rosidl_runtime_py.utilities import get_message
+    cls = get_message(msg_type)
+except Exception as exc:
+    print("@@ERR cannot load %s: %s" % (msg_type, exc)); sys.exit(3)
+
+# Match the publisher's QoS. A RELIABLE default subscription silently receives
+# nothing from a BEST_EFFORT publisher (camera drivers publish BEST_EFFORT).
+qos = QoSProfile(depth=10)
+try:
+    infos = node.get_publishers_info_by_topic(topic)
+    if infos:
+        qos.reliability = infos[0].qos_profile.reliability
+        qos.durability = infos[0].qos_profile.durability
+except Exception:
+    pass
+
+def cb(msg):
+    box["msg"] = msg
+
+node.create_subscription(cls, topic, cb, qos)
+deadline = time.time() + seconds
+while time.time() < deadline and "msg" not in box:
+    rclpy.spin_once(node, timeout_sec=0.1)
+
+if "msg" not in box:
+    print("@@NOMSG"); sys.exit(0)
+
+msg = box["msg"]
+stamp = ""
+try:
+    stamp = "%d.%09d" % (msg.header.stamp.sec, msg.header.stamp.nanosec)
+except Exception:
+    pass
+
+frame = ""
+try:
+    frame = msg.header.frame_id
+except Exception:
+    pass
+
+if msg_type.endswith("/Image") and hasattr(msg, "height"):
+    body = "%dx%d encoding=%s step=%d frame=%s" % (msg.height, msg.width, msg.encoding, msg.step, frame)
+elif msg_type.endswith("/CompressedImage"):
+    body = "%s %d bytes frame=%s" % (getattr(msg, "format", "?"), len(getattr(msg, "data", b"") or b""), frame)
+else:
+    body = repr(msg)
+print("@@TYPE %s" % msg_type)
+print("@@STAMP %s" % stamp)
+print("@@MSG %s" % " ".join(body.split())[:1200])
+'''
+
+
+def sample_last(target: Target, topic: str, seconds: int = 3) -> tuple[dict, Result]:
+    """One message from a topic, with the publisher's QoS so BEST_EFFORT topics work."""
+    topic = validate_topic(topic)
+    seconds = max(2, min(15, int(seconds)))
+    script = f"python3 - {shlex.quote(topic)} {seconds} <<'HERMES_SAMPLE'\n{SAMPLE_BODY}\nHERMES_SAMPLE"
+    result = run(target, script, timeout=seconds + 14, label=f"sample {topic}")
+    stdout = result.stdout or ""
+    if "@@ERR" in stdout:
+        message = stdout.split("@@ERR", 1)[1].strip().splitlines()[0]
+        return {"topic": topic, "ok": False, "error": message}, result
+    if "@@NOMSG" in stdout:
+        return {
+            "topic": topic,
+            "ok": True,
+            "received": False,
+            "message": "",
+            "hint": "nothing arrived in the window — an event-driven or idle topic",
+        }, result
+    if "@@MSG " not in stdout:
+        return {"topic": topic, "ok": False,
+                "error": result.error() if not result.ok else "no message payload returned"}, result
+
+    meta = {}
+    for line in stdout.splitlines():
+        for key, field in (("@@TYPE ", "type"), ("@@STAMP ", "stamp")):
+            if line.startswith(key):
+                meta[field] = line[len(key):].strip()
+    body = stdout.split("@@MSG ", 1)[1].strip().splitlines()[0]
+    return {"topic": topic, "ok": True, "received": True, "message": body, **meta}, result
+
+
 # ----------------------------------------------------------------------- host info
+
 
 HOST_SCRIPT = r"""
 echo "@@DISTRO ${ROS_DISTRO:-unknown}"

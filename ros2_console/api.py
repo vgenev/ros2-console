@@ -93,6 +93,28 @@ def get_graph(host: str = "", distro: str = "") -> dict:
         return {"ok": False, "error": str(exc)}
 
 
+@router.get("/sample")
+def get_sample(topic: str = "", seconds: int = 3, host: str = "", distro: str = "") -> dict:
+    """Last message on a topic, for the page's hover card."""
+    if not topic:
+        return {"ok": False, "topic": topic, "error": "topic is required"}
+    try:
+        data, result = obs.sample_last(_target_from(host, distro), topic, seconds)
+    except Exception as exc:
+        return {"ok": False, "topic": topic, "error": str(exc)}
+    if not data.get("ok"):
+        return {"ok": False, "topic": topic, "error": data.get("error") or result.error()}
+    return {
+        "ok": True,
+        "topic": topic,
+        "received": bool(data.get("received")),
+        "type": data.get("type") or "",
+        "stamp": data.get("stamp") or "",
+        "message": data.get("message") or "",
+        "hint": data.get("hint"),
+    }
+
+
 @router.get("/camera")
 def get_camera(topic: str = "", host: str = "", distro: str = "") -> dict:
     if not topic:
