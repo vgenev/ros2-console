@@ -173,7 +173,69 @@ function OrphanBanner({ graph }) {
   })
 }
 
-function Legend() {
+// Any of these separates node names in the filter field. Deliberately does NOT
+// include "/": node names never contain a slash, but topic names always start
+// with one, and splitting on it would turn a pasted topic into two garbage terms.
+function splitTerms(text) {
+  return String(text || '')
+    .split(/[,;|\s]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+function FilterBar({ query, onQuery, showing, total, activeLabel, onClear }) {
+  return jsxs('div', {
+    style: {
+      display: 'flex',
+      gap: '8px',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      padding: '0 2px 8px',
+    },
+    children: [
+      jsx('input', {
+        value: query,
+        onChange: (ev) => onQuery(ev.target.value),
+        placeholder: 'filter nodes — comma, space, semicolon or | separates names',
+        'aria-label': 'filter nodes by name',
+        spellCheck: 'false',
+        style: {
+          flex: '1 1 260px',
+          minWidth: '170px',
+          background: 'transparent',
+          color: SURFACE.text,
+          border: '1px solid ' + SURFACE.stroke,
+          borderRadius: '5px',
+          padding: '5px 8px',
+          fontSize: '12px',
+          outline: 'none',
+        },
+      }, 'q'),
+      jsx('span', {
+        style: { fontSize: '11px', color: SURFACE.muted, whiteSpace: 'nowrap' },
+        children: showing + ' of ' + total + ' nodes',
+      }, 'count'),
+      activeLabel
+        ? jsx('span', {
+            onClick: onClear,
+            title: 'clear every filter',
+            style: {
+              fontSize: '11px',
+              color: SURFACE.body,
+              cursor: 'pointer',
+              border: '1px solid ' + SURFACE.stroke,
+              borderRadius: '10px',
+              padding: '2px 8px',
+              whiteSpace: 'nowrap',
+            },
+            children: activeLabel + '  ×',
+          }, 'clear')
+        : null,
+    ],
+  })
+}
+
+function Legend({ active, onSelect }) {
   const items = [
     ['live', 'live — connected, data flowing'],
     ['silent', 'silent — connected, nothing in the sample window'],
@@ -186,7 +248,7 @@ function Legend() {
     style: {
       display: 'flex',
       flexWrap: 'wrap',
-      gap: '10px 16px',
+      gap: '6px 10px',
       fontSize: '11px',
       color: SURFACE.muted,
       padding: '8px 4px 2px',
@@ -194,9 +256,23 @@ function Legend() {
       marginTop: '4px',
     },
     children: [
-      ...items.map(([key, label]) =>
-        jsxs('span', {
-          style: { display: 'inline-flex', gap: '5px', alignItems: 'center' },
+      ...items.map(([key, label]) => {
+        const on = active === key
+        const dim = active && !on
+        return jsxs('span', {
+          onClick: () => onSelect && onSelect(on ? null : key),
+          title: on ? 'clear this filter' : 'show only ' + key + ' topics',
+          style: {
+            display: 'inline-flex',
+            gap: '5px',
+            alignItems: 'center',
+            cursor: 'pointer',
+            padding: '2px 7px',
+            borderRadius: '11px',
+            opacity: dim ? 0.4 : 1,
+            background: on ? 'rgba(255,255,255,0.09)' : 'transparent',
+            border: '1px solid ' + (on ? SURFACE.stroke : 'transparent'),
+          },
           children: [
             jsx('span', {
               style: {
@@ -210,12 +286,13 @@ function Legend() {
             jsx('span', { children: label }, 'lb' + key),
           ],
         }, key)
-      ),
+      }),
       jsx('span', {
-        style: { width: '100%' },
+        style: { width: '100%', lineHeight: 1.5 },
         children:
           'solid line = publisher → topic · dashed = topic → subscriber · ' +
-          'moving dashes = measured traffic, speed follows msg/s',
+          'moving dashes = measured traffic, speed follows msg/s · ' +
+          'click a node or a key above to filter',
       }, 'lines'),
     ],
   })
@@ -224,6 +301,10 @@ function Legend() {
 function Topology({ graph, onHover, onLeave, onPin }) {
   const edges = (graph && graph.edges) || []
   const topics = (graph && graph.topics) || []
+  const [focus, setFocus] = useState(null)
+  const [typeFilter, setTypeFilter] = useState(null)
+  const [query, setQuery] = useState('')
+
   if (!edges.length) {
     return jsx('p', {
       children:
@@ -231,12 +312,40 @@ function Topology({ graph, onHover, onLeave, onPin }) {
         'only the daemon fallback ran).',
     })
   }
+
   const health = new Map(topics.map((t) => [t.name, t.health]))
   const rates = new Map(topics.map((t) => [t.name, Number(t.rate_hz) || 0]))
   const names = new Set(edges.map((e) => e.node))
   for (const n of (graph && graph.nodes) || []) names.add(n)
-  const nodeList = [...names].sort()
-  const topicList = [...new Set(edges.map((e) => e.topic))].sort()
+  const allNodes = [...names].sort()
+
+  const terms = splitTerms(query)
+  const matched = new Set(
+    terms.length ? allNodes.filter((n) => terms.some((t) => n.toLowerCase().includes(t))) : []
+  )
+
+  // Three filters, all narrowing the same edge list. A node filter keeps the
+  // peers that share a topic on purpose: "what is this node wired to" is only
+  // answerable if the far end of each wire stays visible.
+  let shown = edges
+  if (typeFilter) {
+    shown = shown.filter((e) => (health.get(e.topic) || 'unmeasured') === typeFilter)
+  }
+  if (terms.length) {
+    const matchedTopics = new Set(shown.filter((e) => matched.has(e.node)).map((e) => e.topic))
+    shown = shown.filter((e) => matched.has(e.node) || matchedTopics.has(e.topic))
+  }
+  const focusTopics = focus
+    ? new Set(edges.filter((e) => e.node === focus).map((e) => e.topic))
+    : null
+  if (focus) {
+    shown = shown.filter((e) => e.node === focus || focusTopics.has(e.topic))
+  }
+
+  const nodeList = [...new Set(shown.map((e) => e.node))].sort()
+  if (focus && !nodeList.includes(focus)) nodeList.push(focus)
+  const topicList = [...new Set(shown.map((e) => e.topic))].sort()
+
   const rowH = 26
   const W = 820
   const LANE_L = 210
@@ -245,7 +354,9 @@ function Topology({ graph, onHover, onLeave, onPin }) {
   const nodeY = new Map(nodeList.map((n, i) => [n, 18 + i * rowH]))
   const topicY = new Map(topicList.map((t, i) => [t, 18 + i * rowH]))
 
-  const lines = edges.map((e, i) => {
+  const isDim = (node) => terms.length > 0 && !matched.has(node)
+
+  const lines = shown.map((e, i) => {
     const y1 = nodeY.get(e.node)
     const y2 = topicY.get(e.topic)
     if (y1 == null || y2 == null) return null
@@ -266,7 +377,7 @@ function Topology({ graph, onHover, onLeave, onPin }) {
       stroke: color,
       'stroke-width': moves ? 1.8 : 1.2,
       'stroke-dasharray': moves ? '7 7' : e.role === 'publisher' ? '0' : '4 3',
-      opacity: moves ? 0.75 : 0.42,
+      opacity: (moves ? 0.75 : 0.42) * (isDim(e.node) ? 0.3 : 1),
       children: moves
         ? jsx('animate', {
             attributeName: 'stroke-dashoffset',
@@ -279,52 +390,86 @@ function Topology({ graph, onHover, onLeave, onPin }) {
     }, 'e' + i)
   })
 
+  const activeBits = []
+  if (typeFilter) activeBits.push('type: ' + typeFilter)
+  if (focus) activeBits.push('node: ' + focus)
+  if (terms.length) activeBits.push('matching "' + query.trim() + '"')
+  const activeLabel = activeBits.join(' · ')
+
   return jsxs('div', {
-    style: { overflow: 'auto', border: '1px solid ' + SURFACE.stroke, borderRadius: '6px', background: 'transparent' },
     children: [
-      jsxs('svg', {
-        width: String(W),
-        height: String(Math.max(height, 60)),
-        style: { display: 'block' },
+      jsx(FilterBar, {
+        query: query,
+        onQuery: setQuery,
+        showing: nodeList.length,
+        total: allNodes.length,
+        activeLabel: activeLabel,
+        onClear: () => {
+          setQuery('')
+          setFocus(null)
+          setTypeFilter(null)
+        },
+      }, 'bar'),
+      jsxs('div', {
+        style: { overflow: 'auto', border: '1px solid ' + SURFACE.stroke, borderRadius: '6px', background: 'transparent' },
         children: [
-          ...lines,
-          ...nodeList.map((n) =>
-            jsx('text', {
-              x: String(LANE_L - 8),
-              y: String(nodeY.get(n) + 4),
-              'text-anchor': 'end',
-              'font-size': '11',
-              fill: SURFACE.body,
-              children: n.length > 30 ? n.slice(0, 29) + '…' : n,
-            }, 'n' + n)
-          ),
-          ...topicList.map((t) => {
-            const h = health.get(t)
-            return jsxs('g', {
-              onMouseEnter: (ev) => onHover && onHover(t, ev),
-              onMouseLeave: () => onLeave && onLeave(),
-              onClick: (ev) => onPin && onPin(t, ev),
-              style: { cursor: 'pointer' },
-              children: [
-                jsx('circle', {
-                  cx: String(LANE_R + 6),
-                  cy: String(topicY.get(t)),
-                  r: '3.5',
-                  fill: HEALTH_COLOR[h] || '#9aa3b5',
-                }, 'd' + t),
-                jsx('text', {
-                  x: String(LANE_R + 15),
-                  y: String(topicY.get(t) + 4),
-                  'font-size': '11',
-                  fill: SURFACE.body,
-                  children: t + ' · ' + (rates.get(t) ? rates.get(t).toFixed(1) + '/s' : 'no traffic'),
-                }, 't' + t),
-              ],
-            }, 'g' + t)
-          }),
+          topicList.length === 0
+            ? jsx('p', {
+                style: { padding: '14px', fontSize: '12px', color: SURFACE.muted },
+                children: 'No edges match these filters. Clear one to widen the view.',
+              }, 'none')
+            : jsxs('svg', {
+                width: String(W),
+                height: String(Math.max(height, 60)),
+                style: { display: 'block' },
+                children: [
+                  ...lines,
+                  ...nodeList.map((n) => {
+                    const on = focus === n
+                    const peerOfFocus = focusTopics && !on && focusTopics.size > 0 &&
+                      edges.some((e) => e.node === n && focusTopics.has(e.topic))
+                    return jsx('text', {
+                      x: String(LANE_L - 8),
+                      y: String(nodeY.get(n) + 4),
+                      'text-anchor': 'end',
+                      'font-size': '11',
+                      fill: on ? SURFACE.text : SURFACE.body,
+                      'font-weight': on ? '600' : '400',
+                      opacity: isDim(n) ? 0.35 : 1,
+                      onClick: () => setFocus(on ? null : n),
+                      style: { cursor: 'pointer' },
+                      children: (on ? '▸ ' : '') + (n.length > 30 ? n.slice(0, 29) + '…' : n),
+                    }, 'n' + n)
+                  }),
+                  ...topicList.map((t) => {
+                    const h = health.get(t)
+                    return jsxs('g', {
+                      onMouseEnter: (ev) => onHover && onHover(t, ev),
+                      onMouseLeave: () => onLeave && onLeave(),
+                      onClick: (ev) => onPin && onPin(t, ev),
+                      style: { cursor: 'pointer' },
+                      children: [
+                        jsx('circle', {
+                          cx: String(LANE_R + 6),
+                          cy: String(topicY.get(t)),
+                          r: '3.5',
+                          fill: HEALTH_COLOR[h] || '#9aa3b5',
+                        }, 'd' + t),
+                        jsx('text', {
+                          x: String(LANE_R + 15),
+                          y: String(topicY.get(t) + 4),
+                          'font-size': '11',
+                          fill: SURFACE.body,
+                          children: t + ' · ' + (rates.get(t) ? rates.get(t).toFixed(1) + '/s' : 'no traffic'),
+                        }, 't' + t),
+                      ],
+                    }, 'g' + t)
+                  }),
+                ],
+              }),
         ],
       }),
-      jsx(Legend, {}, 'legend'),
+      jsx(Legend, { active: typeFilter, onSelect: setTypeFilter }, 'legend'),
     ],
   })
 }
