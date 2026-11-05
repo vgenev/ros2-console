@@ -220,21 +220,27 @@ def _unpublished(topic: str) -> dict:
     }
 
 
-def rate(target: Target, topic: str, seconds: int = 6, window: int = 50) -> tuple[dict, Result]:
+def rate(target: Target, topic: str, seconds: int = 6, window: int = 30) -> tuple[dict, Result]:
+    """Measure the receive rate over a real window.
+
+    The window is a MESSAGE count, not a time: at 10 Hz a window of 50 needs five
+    seconds to fill, so a short measurement reports a half-filled average and reads
+    low. `window` defaults to 30 so the number converges inside a 3 s measurement.
+    The result carries min/max/std_dev so a stalling publisher is visible in the
+    tool output instead of being averaged away.
+    """
     topic = validate_topic(topic)
     seconds = max(3, min(20, int(seconds)))
     info = run(target, _info_script(topic), timeout=5, label=f"info {topic}")
     if _publisher_count(info.stdout or "") == 0:
         return _unpublished(topic), info
-    # A 5s SIGKILL on this cell stopped at window 24 and 6.855 Hz, under the
-    # 7 Hz floor. Thirteen seconds fills the 50-message window and held 8.3 Hz.
-    kill_after = seconds + 8
-    result = run(target, _rate_script(topic, kill_after, window), timeout=kill_after + 8,
+    result = run(target, _rate_script(topic, seconds, window), timeout=seconds + 8,
                  label=f"rate {topic}")
     # Empty stdout is silent even when SSH wrote a warning on stderr.
     data = parse_rate(result.stdout or "")
     data["topic"] = topic
-    data["measured_seconds"] = kill_after
+    data["measured_seconds"] = seconds
+    data["window"] = window
     if data["silent"] and "hint" not in data:
         data["hint"] = (
             "no messages arrived in the window — either the topic has no live publisher "

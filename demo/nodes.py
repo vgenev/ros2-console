@@ -31,12 +31,14 @@ JPEG = (Path(__file__).with_name("testcard.jpg")).read_bytes()
 
 
 class Camera(Node):
-    """Publishes compressed frames at 5 Hz, like a real inspection camera."""
+    """Publishes compressed frames at 2 Hz, like a real inspection camera."""
 
     def __init__(self):
         super().__init__("inspection_camera")
         self.pub = self.create_publisher(CompressedImage, "/camera/image_raw/compressed", 4)
-        self.create_timer(0.2, self.tick)
+        # 2 Hz keeps the single-process demo cell from starving the 10 Hz talker;
+        # a starved talker made rate measurements bimodal (6.3 vs 10.0 Hz).
+        self.create_timer(0.5, self.tick)
 
     def tick(self):
         msg = CompressedImage()

@@ -29,8 +29,17 @@ def _call(fn, topic: str, seconds: int) -> dict:
 
 
 def test_chatter_rate_is_about_ten_hertz():
+    started = time.monotonic()
     data = _call(_topic_rate, "/chatter", 5)
-    assert 7 <= data["hz"] <= 12
+    elapsed = time.monotonic() - started
+    # Measured 9.99-10.04 Hz over 8 consecutive runs once the demo cell stopped
+    # starving the talker (2 Hz camera instead of 5 Hz). The band stays open for a
+    # contended container, and the elapsed bound catches a measurement that
+    # stretches into the transport cap instead of finishing its window.
+    assert 8 <= data["hz"] <= 12
+    assert data["silent"] is False
+    assert data["window"] >= 10
+    assert elapsed < 9
 
 
 def test_depth_topic_is_silent_without_a_publisher():
