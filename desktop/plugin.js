@@ -184,7 +184,7 @@ function splitTerms(text) {
 }
 
 // Pure, so it can be tested without a renderer. A term matches a node OR a
-// topic: asking for "/example_cell/verdict" is asking for that wire, and a field
+// topic: asking for "/demo/verdict" is asking for that wire, and a field
 // that silently only knew how to spell node names was a trap.
 function selectEdges(edges, opts) {
   const terms = opts.terms || []

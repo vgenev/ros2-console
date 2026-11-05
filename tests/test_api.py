@@ -162,10 +162,10 @@ def test_sample_route_returns_the_last_message(client, monkeypatch):
                 Result(ok=True))
 
     monkeypatch.setattr("ros2_console.graph.sample_last", fake_sample)
-    body = client.get(f"{PREFIX}/sample", params={"topic": "/example_cell/alarm"}).json()
+    body = client.get(f"{PREFIX}/sample", params={"topic": "/demo/alarm"}).json()
     assert body == {
         "ok": True,
-        "topic": "/example_cell/alarm",
+        "topic": "/demo/alarm",
         "received": True,
         "type": "std_msgs/msg/Bool",
         "stamp": "12.5",

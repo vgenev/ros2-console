@@ -1,20 +1,28 @@
-"""Bundled skills: valid frontmatter, registered by name, and free of client material.
+"""Bundled skills: valid frontmatter, registered by name, and a whole-tree
+boundary against client material.
 
 The last test is a boundary, not a style check: this plugin ships to a public
-catalog, so no skill may carry another project's or a customer's material. The
-forbidden list is deliberately blunt — if a name is not meant to leave the
-building, it does not belong in a skill.
+catalog, so no tracked file may carry another project's or a customer's
+material. It scans every tracked text file, not just `skills/` — the strings it
+rejects sat in tests and a comment while the old guard read only skills/ and
+reported clean.
 """
 
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import yaml
 
-SKILLS = Path("skills")
-FORBIDDEN = ("example_prefix", "example_org", "example_board", "example_contact", "example_cell", "example_cell-")
+ROOT = Path(__file__).resolve().parent.parent
+SKILLS = ROOT / "skills"
+SELF = Path(__file__).resolve()
+
+# Spell the strings out here and nowhere else: the guard has to fail on these
+# exact words, so this tuple is the one place in the tree that carries them.
+FORBIDDEN = ("example_cell", "example_ws", "example_prefix", "example_org", "example_board", "example_contact")
 
 
 def _skill_dirs():
@@ -75,11 +83,34 @@ def test_register_skills_each_bundled_skill(monkeypatch):
     assert all(filename == "SKILL.md" for _, filename in skills_calls)
 
 
-def test_no_skill_carries_client_or_project_material():
+def _tracked_text_files():
+    """Every tracked file that decodes as text, minus this test itself."""
+    listing = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True
+    ).stdout
+    for raw in listing.split(b"\0"):
+        if not raw:
+            continue
+        name = raw.decode()
+        path = ROOT / name
+        if path.resolve() == SELF or not path.is_file():
+            continue
+        data = path.read_bytes()
+        if b"\0" in data[:8000]:
+            continue  # binary asset: prose does not leak from here
+        try:
+            yield name, data.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+
+
+def test_no_tracked_file_carries_client_or_project_material():
     offenders = []
-    for directory in _skill_dirs():
-        text = (directory / "SKILL.md").read_text().lower()
+    for name, text in _tracked_text_files():
+        lowered = text.lower()
         for word in FORBIDDEN:
-            if re.search(rf"\b{re.escape(word)}", text):
-                offenders.append((directory.name, word))
-    assert offenders == [], f"client material leaked into skills: {offenders}"
+            # Word-start match, so a topic such as `/demo/<word>` is caught while
+            # an unrelated word that merely contains the letters is not.
+            if re.search(rf"(?<![a-z0-9]){re.escape(word)}", lowered):
+                offenders.append((name, word))
+    assert offenders == [], f"client material leaked into the tree: {offenders}"
