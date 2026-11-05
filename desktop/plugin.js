@@ -20,13 +20,24 @@ function animBucket(rate) {
   if (rate >= 1) return 3
   return 4
 }
+// Muted on purpose: six saturated hues next to each other read as decoration and
+// clash with any theme. These stay distinguishable at 1px stroke width while
+// sitting quietly on a dark background.
 const HEALTH_COLOR = {
-  live: '#3dd68c',
-  dead_input: '#ff6b6b',
-  dead_output: '#e6b35a',
-  unmeasured: '#9aa3b5',
-  state: '#6aa9ff',
-  silent: '#9b7bff',
+  live: '#4fa97e',
+  dead_input: '#cf6b70',
+  dead_output: '#c8944f',
+  unmeasured: '#7f8794',
+  state: '#5b93c7',
+  silent: '#8b7fc4',
+}
+
+const SURFACE = {
+  bg: 'var(--ui-bg-primary, #0f1319)',
+  stroke: 'var(--ui-stroke-secondary, #ffffff1f)',
+  text: 'var(--ui-text-primary, #e6e9ef)',
+  muted: 'var(--ui-text-tertiary, #98a1ad)',
+  body: 'var(--ui-text-secondary, #c3cad4)',
 }
 
 const store = {
@@ -136,16 +147,19 @@ function OrphanBanner({ graph }) {
     : 'Disconnected: ' + count
   return jsxs('div', {
     style: {
-      background: '#3a2a12',
-      color: '#e6b35a',
-      padding: '6px 8px',
+      background: 'rgba(200, 148, 79, 0.10)',
+      border: '1px solid rgba(200, 148, 79, 0.32)',
+      borderRadius: '6px',
+      color: SURFACE.body,
+      padding: '7px 10px',
       marginBottom: '8px',
+      fontSize: '12px',
     },
     children: [
-      headline,
+      jsx('span', { style: { color: '#c8944f', fontWeight: 600 }, children: headline }),
       excluded || latched
         ? jsx('div', {
-            style: { marginTop: '4px', color: 'var(--ui-text-tertiary)' },
+            style: { marginTop: '4px', color: SURFACE.muted, fontSize: '11px' },
             children: [
               excluded ? 'System topics were not counted. ' : '',
               latched
@@ -174,9 +188,9 @@ function Legend() {
       flexWrap: 'wrap',
       gap: '10px 16px',
       fontSize: '11px',
-      color: 'var(--ui-text-tertiary)',
+      color: SURFACE.muted,
       padding: '8px 4px 2px',
-      borderTop: '1px solid var(--ui-stroke-secondary, #8883)',
+      borderTop: '1px solid ' + SURFACE.stroke,
       marginTop: '4px',
     },
     children: [
@@ -252,7 +266,7 @@ function Topology({ graph, onHover, onLeave }) {
       stroke: color,
       'stroke-width': moves ? 1.8 : 1.2,
       'stroke-dasharray': moves ? '7 7' : e.role === 'publisher' ? '0' : '4 3',
-      opacity: moves ? 0.9 : 0.55,
+      opacity: moves ? 0.75 : 0.42,
       children: moves
         ? jsx('animate', {
             attributeName: 'stroke-dashoffset',
@@ -266,7 +280,7 @@ function Topology({ graph, onHover, onLeave }) {
   })
 
   return jsxs('div', {
-    style: { overflow: 'auto', border: '1px solid var(--ui-stroke-secondary, #8883)', borderRadius: '6px' },
+    style: { overflow: 'auto', border: '1px solid ' + SURFACE.stroke, borderRadius: '6px', background: 'transparent' },
     children: [
       jsxs('svg', {
         width: String(W),
@@ -280,7 +294,7 @@ function Topology({ graph, onHover, onLeave }) {
               y: String(nodeY.get(n) + 4),
               'text-anchor': 'end',
               'font-size': '11',
-              fill: 'var(--ui-text-secondary)',
+              fill: SURFACE.body,
               children: n.length > 30 ? n.slice(0, 29) + '…' : n,
             }, 'n' + n)
           ),
@@ -301,7 +315,7 @@ function Topology({ graph, onHover, onLeave }) {
                   x: String(LANE_R + 15),
                   y: String(topicY.get(t) + 4),
                   'font-size': '11',
-                  fill: 'var(--ui-text-secondary)',
+                  fill: SURFACE.body,
                   children: t + ' · ' + (rates.get(t) ? rates.get(t).toFixed(1) + '/s' : 'no traffic'),
                 }, 't' + t),
               ],
@@ -400,12 +414,12 @@ function TopicTip({ tip }) {
       top: tip.y + 'px',
       zIndex: 9999,
       width: '450px',
-      padding: '8px 10px',
+      padding: '9px 11px',
       borderRadius: '6px',
-      border: '1px solid var(--ui-stroke-secondary, #8884)',
-      background: 'var(--ui-bg-secondary, #14161c)',
-      color: 'var(--ui-text-primary, #e6e6e6)',
-      boxShadow: '0 8px 28px #0006',
+      border: '1px solid ' + SURFACE.stroke,
+      background: SURFACE.bg,
+      color: SURFACE.text,
+      boxShadow: '0 10px 32px rgba(0, 0, 0, 0.45)',
       pointerEvents: 'none',
       fontSize: '11px',
       lineHeight: '1.45',
@@ -518,9 +532,13 @@ function Pane({ ctx, bus }) {
   }
 
   function onHover(topicName, event) {
-    const win = typeof window !== 'undefined' ? window.innerWidth || 1200 : 1200
-    const x = Math.max(8, Math.min(event.clientX + 14, win - 470))
-    const y = event.clientY + 16
+    const winW = typeof window !== 'undefined' ? window.innerWidth || 1200 : 1200
+    const winH = typeof window !== 'undefined' ? window.innerHeight || 800 : 800
+    const x = Math.max(8, Math.min(event.clientX + 18, winW - 480))
+    // Keep the card inside the window; below the pointer it covers the very label
+    // being inspected, so flip above when there is no room underneath.
+    const below = event.clientY + 18
+    const y = below + 240 > winH ? Math.max(8, event.clientY - 250) : below
     const hit = SAMPLE_CACHE.get(topicName)
     if (hit && Date.now() - hit.at < 30000) {
       setTip({ topic: topicName, data: hit.data, x: x, y: y })
