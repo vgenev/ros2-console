@@ -396,7 +396,7 @@ function TopicTip({ tip }) {
   const rawError = tip.error || ''
   const error =
     /404/.test(rawError)
-      ? 'this route is not loaded yet — the gateway is running an older plugin build; restart it to enable hover samples'
+      ? 'This route is not loaded yet — the gateway is running an older plugin build; restart it to enable hover samples.'
       : rawError
   const body = tip.loading
     ? 'reading one message…'
@@ -405,45 +405,56 @@ function TopicTip({ tip }) {
       : data
         ? data.received
           ? data.message
-          : data.hint || 'no message arrived in the window'
+          : data.hint || 'No message arrived in the window.'
         : ''
+  const label = { color: '#96a0ae', fontSize: '11px' }
   return jsxs('div', {
     style: {
       position: 'fixed',
       left: tip.x + 'px',
       top: tip.y + 'px',
       zIndex: 9999,
-      width: '450px',
-      padding: '9px 11px',
-      borderRadius: '6px',
-      border: '1px solid ' + SURFACE.stroke,
-      background: SURFACE.bg,
-      color: SURFACE.text,
-      boxShadow: '0 10px 32px rgba(0, 0, 0, 0.45)',
+      width: '460px',
+      padding: '10px 12px',
+      borderRadius: '7px',
+      border: '1px solid rgba(255, 255, 255, 0.16)',
+      background: '#11151c',
+      color: '#eef2f8',
+      boxShadow: '0 12px 34px rgba(0, 0, 0, 0.55)',
       pointerEvents: 'none',
-      fontSize: '11px',
-      lineHeight: '1.45',
+      fontSize: '12px',
+      lineHeight: '1.5',
     },
     children: [
       jsx('div', {
-        style: { fontFamily: 'ui-monospace, monospace', fontWeight: 600, marginBottom: '2px' },
+        style: {
+          fontFamily: 'ui-monospace, monospace',
+          fontWeight: 700,
+          fontSize: '12.5px',
+          color: '#ffffff',
+          marginBottom: '3px',
+          wordBreak: 'break-all',
+        },
         children: tip.topic,
       }, 'head'),
       data && data.type
-        ? jsx('div', { style: { color: 'var(--ui-text-tertiary)' }, children: 'type: ' + data.type }, 'type')
+        ? jsx('div', { style: label, children: 'type: ' + data.type }, 'type')
         : null,
       data && data.stamp
-        ? jsx('div', { style: { color: 'var(--ui-text-tertiary)' }, children: 'stamp: ' + data.stamp }, 'stamp')
+        ? jsx('div', { style: label, children: 'stamp: ' + data.stamp }, 'stamp')
         : null,
       jsx('div', {
         style: {
-          marginTop: '6px',
+          marginTop: '7px',
+          paddingTop: '7px',
+          borderTop: '1px solid rgba(255, 255, 255, 0.10)',
           fontFamily: 'ui-monospace, monospace',
+          fontSize: '12px',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
           maxHeight: '180px',
           overflow: 'hidden',
-          color: 'var(--ui-text-secondary)',
+          color: error ? '#f0a5a5' : '#dfe6ef',
         },
         children: body,
       }, 'body'),
