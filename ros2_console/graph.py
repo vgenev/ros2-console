@@ -226,12 +226,15 @@ def rate(target: Target, topic: str, seconds: int = 6, window: int = 50) -> tupl
     info = run(target, _info_script(topic), timeout=5, label=f"info {topic}")
     if _publisher_count(info.stdout or "") == 0:
         return _unpublished(topic), info
-    result = run(target, _rate_script(topic, seconds, window), timeout=seconds + 8,
+    # A 5s SIGKILL on this cell stopped at window 24 and 6.855 Hz, under the
+    # 7 Hz floor. Thirteen seconds fills the 50-message window and held 8.3 Hz.
+    kill_after = seconds + 8
+    result = run(target, _rate_script(topic, kill_after, window), timeout=kill_after + 8,
                  label=f"rate {topic}")
     # Empty stdout is silent even when SSH wrote a warning on stderr.
     data = parse_rate(result.stdout or "")
     data["topic"] = topic
-    data["measured_seconds"] = seconds
+    data["measured_seconds"] = kill_after
     if data["silent"] and "hint" not in data:
         data["hint"] = (
             "no messages arrived in the window — either the topic has no live publisher "
