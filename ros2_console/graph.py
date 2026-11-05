@@ -36,23 +36,72 @@ def validate_topic(topic: str) -> str:
 
 # --------------------------------------------------------------------------- graph
 
+GRAPH_INTROSPECT = r"""
+import sys, time
+try:
+    import rclpy
+    from rclpy.node import Node
+except Exception:
+    print("@@NORCLPY"); sys.exit(0)
+try:
+    rclpy.init()
+    node = Node("_hermes_graph_probe")
+except Exception:
+    print("@@NORCLPY"); sys.exit(0)
+end = time.time() + 3.0
+while time.time() < end:
+    rclpy.spin_once(node, timeout_sec=0.1)
+total_pubs = 0
+for name, types in sorted(node.get_topic_names_and_types()):
+    typ = types[0] if types else "?"
+    try:
+        pubs = len(node.get_publishers_info_by_topic(name))
+        subs = len(node.get_subscriptions_info_by_topic(name))
+    except Exception:
+        pubs = subs = -1
+    if pubs > 0:
+        total_pubs += pubs
+    print("@@T|%s|%s|%s|%s" % (name, pubs, subs, typ))
+print("@@PUBS %d" % total_pubs)
+node.destroy_node()
+rclpy.shutdown()
+"""
+
 GRAPH_SCRIPT = r"""
 echo "@@DISTRO ${ROS_DISTRO:-unknown}"
 echo "@@RMW ${RMW_IMPLEMENTATION:-default}"
 echo "@@NODES"
 ros2 node list 2>&1 | head -300
 echo "@@TOPICS"
-ros2 topic list -t 2>&1 | head -500
+TOPICS_OUT=$(ros2 topic list -t 2>&1 | head -500)
+printf '%s\n' "$TOPICS_OUT"
 echo "@@DETAIL"
-for t in $(ros2 topic list 2>/dev/null | head -300); do
-  info=$(ros2 topic info "$t" 2>/dev/null)
-  pub=$(printf '%s\n' "$info" | sed -n 's/^Publisher count: *//p' | head -1)
-  sub=$(printf '%s\n' "$info" | sed -n 's/^Subscription count: *//p' | head -1)
-  typ=$(printf '%s\n' "$info" | sed -n 's/^Type: *//p' | head -1)
-  echo "@@T|$t|${pub:-?}|${sub:-?}|$typ"
-done
+# Publisher/subscriber counts. The `ros2 topic info` CLI path is serialized by
+# the ros2 daemon (~1.9 s per topic measured on a Qualcomm aarch64 board), so ten
+# topics cost 19 s and a hundred would cost three minutes. One rclpy process
+# introspects the whole graph in a single discovery pass instead. The daemon loop
+# stays as the fallback: if rclpy is missing or discovery came back empty, the
+# fast path is discarded rather than reporting every topic as dead.
+FAST=$(python3 - <<'HERMES_INTROSPECT'
+__INTROSPECT__
+HERMES_INTROSPECT
+)
+found=$(printf '%s\n' "$FAST" | grep -c '^@@T|')
+pubs=$(printf '%s\n' "$FAST" | sed -n 's/^@@PUBS *//p' | head -1)
+want=$(printf '%s\n' "$TOPICS_OUT" | grep -c '^/')
+if [ -n "$found" ] && [ "${found:-0}" -ge "${want:-0}" ] && [ "${pubs:-0}" -gt 0 ]; then
+  printf '%s\n' "$FAST" | grep '^@@T|'
+else
+  for t in $(ros2 topic list 2>/dev/null | head -300); do
+    info=$(ros2 topic info "$t" 2>/dev/null)
+    pub=$(printf '%s\n' "$info" | sed -n 's/^Publisher count: *//p' | head -1)
+    sub=$(printf '%s\n' "$info" | sed -n 's/^Subscription count: *//p' | head -1)
+    typ=$(printf '%s\n' "$info" | sed -n 's/^Type: *//p' | head -1)
+    echo "@@T|$t|${pub:-?}|${sub:-?}|$typ"
+  done
+fi
 echo "@@END"
-"""
+""".replace("__INTROSPECT__", GRAPH_INTROSPECT)
 
 # A topic with a type but no publisher is invalid input for its subscribers; a
 # topic with a publisher and no subscriber is an output nobody consumes. Both

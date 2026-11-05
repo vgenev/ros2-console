@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
+import { ROUTES_AREA, SIDEBAR_NAV_AREA } from '@hermes/plugin-sdk'
 
 const DEFAULT_TOPIC = '/camera/image_raw/compressed'
 const POLL_MS = 5000
@@ -365,11 +366,15 @@ export default {
     })
     bus.refresh()
     ctx.register({
-      id: 'pane',
-      area: 'panes',
-      title: 'ROS 2',
-      data: { placement: 'right', width: '360px' },
+      id: 'page',
+      area: ROUTES_AREA,
+      data: { path: '/ros2-console' },
       render: () => jsx(Pane, { ctx, bus }),
+    })
+    ctx.register({
+      id: 'nav',
+      area: SIDEBAR_NAV_AREA,
+      data: { path: '/ros2-console', label: 'ROS 2', codicon: 'radio-tower' },
     })
     ctx.register({
       id: 'orphans',
