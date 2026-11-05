@@ -10,6 +10,23 @@ order that separates them, cheapest test first. Every command here runs on the r
 SSH, with the distro sourced — that is what `ros2_host_status`, `ros2_graph`,
 `ros2_topic_rate` and `ros2_topic_sample` do for you.
 
+## Health is six states, not two
+
+`ros2_graph` returns one of: `live`, `silent`, `state`, `dead_input`, `dead_output`, `unmeasured`.
+Reading them as "up or down" produces wrong conclusions:
+
+- `state` — the publisher uses `TRANSIENT_LOCAL` durability and publishes on change. Zero subscribers
+  is correct here: a late consumer still receives the current value. Do not report it as an orphan.
+- `silent` — publisher and subscriber are connected but no message arrived inside the 2 s sample
+  window. For an event-driven topic that is normal; confirm with `ros2_topic_rate` over a longer window
+  before calling it broken.
+- `dead_output` with `VOLATILE` durability — nobody is listening and nothing is retained. This is the
+  one that means data is being discarded.
+
+For architecture questions ("how does the executor model work", "why does durability matter"), use
+`ros2_docs` against a documentation corpus rather than guessing from a live graph; the graph shows
+wiring, not intent.
+
 ## 1. Is the graph even populated?
 
 `ros2_graph` first. It returns nodes, topics with type and publisher/subscriber counts, and a

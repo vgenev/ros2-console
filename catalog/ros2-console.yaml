@@ -2,7 +2,7 @@ name: ros2-console
 repo: https://github.com/OWNER/ros2-console
 # SHA_PENDING until the first public push, then a 40-hex digest that is not all zeros.
 sha: SHA_PENDING
-description: Read a live ROS 2 graph over SSH. Report topic health, publish rate, one message, and a compressed camera frame.
+description: "Read a live ROS 2 graph over SSH: topic health, measured rate, one message, camera frame, plus architecture answers from your own docs corpus with repo/commit provenance."
 maintainer: vgenev
 tier: community
 category: tools
@@ -15,3 +15,4 @@ capabilities:
     - ros2_topic_rate
     - ros2_topic_sample
     - ros2_camera_snapshot
+    - ros2_docs

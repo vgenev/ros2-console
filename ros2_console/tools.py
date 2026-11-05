@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from . import docs as knowledge
 from . import graph as obs
 from .settings import resolve
 from .transport import Target
@@ -113,6 +114,20 @@ def _camera_snapshot(args, ctx=None):
     path.write_bytes(raw)
     data.update({"path": str(path), "saved_bytes": len(raw)})
     return json.dumps(data, default=str)
+
+
+def _docs_query(args, ctx=None):
+    """Answers come from the user's own corpus; nothing is bundled (the upstream
+    docs are Apache-2.0 / BSD-3-Clause / CC-BY-4.0 work)."""
+    settings = resolve()
+    docs_path = (args or {}).get("docs_path") or settings.get("docs_path") or ""
+    payload = knowledge.query(
+        docs_path,
+        (args or {}).get("query", ""),
+        limit=(args or {}).get("limit", 4),
+        timeout=min(40, int(settings.get("timeout") or 15)),
+    )
+    return json.dumps(payload, default=str)
 
 
 def _call_requires_topic(work, args, ctx) -> str:
@@ -257,6 +272,29 @@ _TOOLS = [
                     "host": {"type": "string", "description": "Override the SSH target for this call."},
                 },
                 "required": ["topic"],
+            },
+        },
+    ),
+    Tool(
+        name="ros2_docs",
+        emoji="📚",
+        handler=_docs_query,
+        schema={
+            "name": "ros2_docs",
+            "description": (
+                "Answer an architecture question ('how does the executor model work', "
+                "'why transient-local durability') from the user's local ROS 2 documentation "
+                "corpus, returning bounded excerpts with the upstream repo and commit for "
+                "each one. Requires docs_path to be configured; it is a knowledge tool, not "
+                "a live-robot tool."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The question or keywords."},
+                    "limit": {"type": "integer", "description": "How many documents to quote, 1-10 (default 4)."},
+                },
+                "required": ["query"],
             },
         },
     ),

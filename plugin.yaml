@@ -18,6 +18,7 @@ provides_tools:
   - ros2_topic_rate
   - ros2_topic_sample
   - ros2_camera_snapshot
+  - ros2_docs
 provides_hooks: []
 provides_middleware: []
 requires_env: []
@@ -45,4 +46,14 @@ config_schema:
     type: int
     default: 15
     description: Per-command timeout in seconds.
+    required: false
+  docs_path:
+    type: string
+    default: ""
+    description: >-
+      Local path to a ROS 2 documentation corpus for the ros2_docs tool (a tree of
+      markdown, optionally with a graphify index at <path>/graphify-out/graph.json).
+      Empty disables the tool with a clear message. Nothing is bundled: the upstream
+      ROS 2, nav2, moveit2 and ros2_control docs are Apache-2.0, BSD-3-Clause and
+      CC-BY-4.0 work, so answers quote them with repo and commit instead.
     required: false

@@ -65,7 +65,12 @@ def test_register_skills_each_bundled_skill(monkeypatch):
             skills_calls.append((name, Path(path).name))
 
     module.register(Ctx())
-    assert len(tools_calls) == 5
+    # Count follows the manifest rather than a hand-kept number: adding a tool
+    # should not silently pass a test that no longer checks anything.
+    from ros2_console import tools as tools_module
+
+    assert len(tools_calls) == len(tools_module.TOOLS)
+    assert set(tools_calls) == {tool.name for tool in tools_module.TOOLS}
     assert [name for name, _ in skills_calls] == [d.name for d in _skill_dirs()]
     assert all(filename == "SKILL.md" for _, filename in skills_calls)
 

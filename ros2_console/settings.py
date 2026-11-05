@@ -17,6 +17,9 @@ DEFAULTS: dict[str, Any] = {
     "distro": "jazzy",
     "setup": "",
     "timeout": 15,
+    # Local directory holding a ROS 2 documentation corpus. Empty by design: the
+    # upstream docs are third-party licensed, so the plugin never ships them.
+    "docs_path": "",
 }
 
 MIN_TIMEOUT = 5
