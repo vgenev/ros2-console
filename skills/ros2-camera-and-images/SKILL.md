@@ -13,9 +13,9 @@ or PNG payload. The difference is not cosmetic:
 | Shape | One frame | At 5 Hz |
 |---|---|---|
 | `Image`, 400×300, `rgb8` | 400 × 300 × 3 = **360,000 B** | ~1.8 MB/s (14.4 Mbit/s) |
-| `CompressedImage`, same view, JPEG q85 | **16,374 B** (measured on this repo's test card) | ~82 kB/s (0.65 Mbit/s) |
+| `CompressedImage`, same view, JPEG q85 | **28,486 B** (measured on this repo's test card; regenerate it with `demo/make_testcard.py`) | ~142 kB/s (1.14 Mbit/s) |
 
-Same camera, ~22× the wire cost. On a wireless or metered edge link that is the difference
+Same camera, ~13× the wire cost. On a wireless or metered edge link that is the difference
 between a working cell and a starved one — and a starved bus does not fail loudly, it makes
 every other topic's rate sag.
 

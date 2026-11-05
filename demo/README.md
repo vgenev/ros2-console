@@ -15,6 +15,15 @@ on it returns the payload even though the message was sent at startup.
 That is the difference between "nothing is listening" and "nothing is lost", and the demo exists to
 show both in one graph: 3 orphans, 2 latched.
 
+## The camera frame
+
+`testcard.jpg` is what `Camera` publishes on every tick — 400×300, JPEG q85, 28,486 bytes. It is
+generated, not photographed: `python3 demo/make_testcard.py` redraws it from the text constants at
+the top of that file, so every string the demo video would broadcast is readable in the repository
+rather than hidden in the pixels. The drawing has no randomness or clock, so two runs write identical
+bytes; the byte count also feeds the bandwidth table in
+`skills/ros2-camera-and-images/SKILL.md`, so regenerate and update that number together.
+
 ## Start the container
 
 The image is `ros:jazzy-ros-base`. The repo is mounted at `/work`. Host port 2222 forwards to sshd in the container.
