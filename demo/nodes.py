@@ -24,6 +24,7 @@ from pathlib import Path
 import rclpy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import Float32, String
 
@@ -107,12 +108,46 @@ class MutedProducer(Node):
         self.pub.publish(msg)
 
 
+class LatchedStatus(Node):
+    """Publishes one status message with TRANSIENT_LOCAL durability and no subscriber.
+
+    This is the case every dashboard gets wrong: 1 publisher, 0 subscribers, no
+    traffic, and yet nothing is lost — the sample is retained and replayed to
+    whoever subscribes later. It reports as `state`, not as a dead output.
+    """
+
+    def __init__(self):
+        super().__init__("session_status")
+        qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        qos.reliability = ReliabilityPolicy.RELIABLE
+        self.pub = self.create_publisher(String, "/session/status", qos)
+        self.create_timer(2.0, self.announce)
+        self.said = False
+
+    def announce(self):
+        if self.said:
+            return
+        msg = String()
+        msg.data = '{"session": "demo", "state": "armed", "cycle": 0}'
+        self.pub.publish(msg)
+        self.said = True
+
+
 BUILDERS = {
     "camera": [Camera, Inspector],
     "talker": [Talker, Listener],
     "zombie": [ZombieConsumer],
     "telemetry": [MutedProducer],
-    "all": [Camera, Inspector, Talker, Listener, ZombieConsumer, MutedProducer],
+    "stateful": [LatchedStatus],
+    "all": [
+        Camera,
+        Inspector,
+        Talker,
+        Listener,
+        ZombieConsumer,
+        MutedProducer,
+        LatchedStatus,
+    ],
 }
 
 

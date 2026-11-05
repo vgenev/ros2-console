@@ -7,6 +7,14 @@ The cell in `demo/nodes.py` is a small inspection line plus two topics that are 
 
 `/inspection/verdict` is also published with no subscriber. The cell leaves it that way.
 
+`/session/status` is the case a naive dashboard gets wrong. It is published **once** with
+`TRANSIENT_LOCAL` durability and has no subscriber, so it reports as `state` rather than
+`dead_output`: the sample is retained and replayed to whoever subscribes later. `ros2_topic_sample`
+on it returns the payload even though the message was sent at startup.
+
+That is the difference between "nothing is listening" and "nothing is lost", and the demo exists to
+show both in one graph: 3 orphans, 2 latched.
+
 ## Start the container
 
 The image is `ros:jazzy-ros-base`. The repo is mounted at `/work`. Host port 2222 forwards to sshd in the container.
