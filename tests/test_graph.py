@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ros2_console.graph import parse_graph
+from ros2_console.graph import parse_graph, parse_rate
 
 FIXTURES = Path(__file__).parent / "fixtures"
 DEAD = FIXTURES / "graph_dead_input.txt"
@@ -88,6 +88,15 @@ def test_topic_info_text_supplies_the_counts():
     assert chatter["publishers"] == int(pubs) == 1
     assert chatter["subscribers"] == int(subs) == 1
     assert chatter["health"] == "live"
+
+
+def test_unpublished_warning_is_silent_with_a_missing_publisher_hint():
+    parsed = parse_rate(
+        "WARNING: topic [/depth/points/compressed] does not appear to be published yet\n"
+    )
+    assert parsed["hz"] == 0.0
+    assert parsed["silent"] is True
+    assert "missing publisher" in parsed["hint"]
 
 
 def test_unmeasured_topic_is_not_an_orphan():

@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 
 from ros2_console.graph import graph, host_status
 from ros2_console.settings import resolve
+from ros2_console.tools import _topic_rate, _topic_sample
 from ros2_console.transport import Target
 
 
@@ -39,6 +40,15 @@ def probe(flag: str | None) -> dict:
     return {"host": host, "graph": data}
 
 
+def _tool_args(topic: str, target: Target, seconds: int) -> dict:
+    args = {"topic": topic, "seconds": seconds}
+    if target.host:
+        args["host"] = target.host
+    if target.distro:
+        args["distro"] = target.distro
+    return args
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Probe a ROS 2 target.")
     parser.add_argument(
@@ -46,8 +56,19 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="SSH host. Overrides the saved setting. Omit to use the saved host, or local mode.",
     )
+    parser.add_argument("--rate", action="append", default=[], help="Topic to measure with ros2_topic_rate.")
+    parser.add_argument("--sample", action="append", default=[], help="Topic to read with ros2_topic_sample.")
+    parser.add_argument("--seconds", type=int, default=5, help="Window for --rate and --sample.")
     args = parser.parse_args(argv)
     payload = probe(args.target)
+    if args.rate or args.sample:
+        target = build_target(args.target)
+        payload["rates"] = [
+            json.loads(_topic_rate(_tool_args(topic, target, args.seconds))) for topic in args.rate
+        ]
+        payload["samples"] = [
+            json.loads(_topic_sample(_tool_args(topic, target, args.seconds))) for topic in args.sample
+        ]
     json.dump(payload, sys.stdout, default=str)
     sys.stdout.write("\n")
     return 0 if payload["graph"] is not None else 1

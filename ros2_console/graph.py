@@ -166,12 +166,18 @@ def parse_rate(text: str) -> dict:
             match = re.search(rf"\b{key}:\s*([0-9.]+)", line)
             if match:
                 stats[key] = float(match.group(1))
+    tail = text.strip().splitlines()[-3:]
     if not rates:
-        silent = "no new messages" in text.lower() or not text.strip()
-        return {"hz": 0.0, "samples": 0, "silent": silent, "stats": stats,
-                "raw_tail": text.strip().splitlines()[-3:]}
+        lower = text.lower()
+        # Jazzy prints this and exits 0 when a topic has subscribers and no publisher.
+        missing_publisher = "does not appear to be published yet" in lower
+        silent = missing_publisher or "no new messages" in lower or not text.strip()
+        data = {"hz": 0.0, "samples": 0, "silent": silent, "stats": stats, "raw_tail": tail}
+        if missing_publisher:
+            data["hint"] = "missing publisher: nobody is publishing this topic"
+        return data
     return {"hz": rates[-1], "samples": len(rates), "silent": False, "stats": stats,
-            "raw_tail": text.strip().splitlines()[-3:]}
+            "raw_tail": tail}
 
 
 def rate(target: Target, topic: str, seconds: int = 6, window: int = 50) -> tuple[dict, Result]:
@@ -183,7 +189,7 @@ def rate(target: Target, topic: str, seconds: int = 6, window: int = 50) -> tupl
     data = parse_rate(result.stdout or result.stderr)
     data["topic"] = topic
     data["measured_seconds"] = seconds
-    if data["silent"]:
+    if data["silent"] and "hint" not in data:
         data["hint"] = (
             "no messages arrived in the window — either the topic has no live publisher "
             "(run ros2_graph and check the publisher count) or its QoS does not match"
