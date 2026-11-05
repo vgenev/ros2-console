@@ -173,6 +173,24 @@ function OrphanBanner({ graph }) {
   })
 }
 
+function TopicCapNote({ graph }) {
+  const counts = (graph && graph.counts) || {}
+  const hidden = counts.topics_truncated
+  if (!hidden) return null
+  const shown = counts.topics_returned != null ? counts.topics_returned : 0
+  const total = typeof counts.topics === 'number' ? counts.topics : shown + hidden
+  return jsx('div', {
+    style: {
+      color: SURFACE.muted,
+      fontSize: '12px',
+      marginBottom: '8px',
+    },
+    children:
+      'Showing ' + shown + ' of ' + total +
+      ' topics — ' + hidden + ' hidden by the display cap; edges are limited to the shown topics.',
+  })
+}
+
 // Any of these separates node names in the filter field. Deliberately does NOT
 // include "/": node names never contain a slash, but topic names always start
 // with one, and splitting on it would turn a pasted topic into two garbage terms.
@@ -551,6 +569,7 @@ function GraphTable({ graph, onHover, onLeave, onPin }) {
               }),
               jsx('td', {
                 style: { padding: '2px 6px', fontFamily: 'ui-monospace, monospace' },
+                title: topic.rate_hz == null ? (topic.rate_reason || 'rate not measured') : undefined,
                 children:
                   topic.rate_hz == null
                     ? '—'
@@ -996,6 +1015,7 @@ function Pane({ ctx, bus }) {
       }),
       snap.error ? jsx('p', { children: snap.error }) : null,
       jsx(OrphanBanner, { graph: snap.graph }),
+      jsx(TopicCapNote, { graph: snap.graph }),
       snap.graph
         ? view === 'topology'
           ? jsx(Topology, {

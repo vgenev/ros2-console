@@ -14,6 +14,11 @@ from .settings import resolve
 from .transport import Target
 
 
+# Payloads list at most this many topics. counts["topics"] stays the full
+# discovered total; topics_returned and topics_truncated describe the slice.
+TOPICS_CAP = 80
+
+
 @dataclass
 class Tool:
     name: str
@@ -79,7 +84,22 @@ def _graph(args, ctx=None):
     if not args.get("all_topics"):
         # The model needs the live map, not three hundred idle introspection topics.
         data["topics"] = [t for t in data["topics"] if t["health"] != "live" or t["publishers"]]
-        data["topics"] = data["topics"][:80]
+        topics = data["topics"]
+        # counts["topics"] stays the full discovered total, not this capped slice.
+        if len(topics) > TOPICS_CAP:
+            kept = topics[:TOPICS_CAP]
+            dropped = len(topics) - len(kept)
+            kept_names = {t["name"] for t in kept}
+            data["topics"] = kept
+            data["edges"] = [
+                edge for edge in data.get("edges") or []
+                if edge.get("topic") in kept_names
+            ]
+            data["counts"]["topics_returned"] = len(kept)
+            data["counts"]["topics_truncated"] = dropped
+        else:
+            data["counts"]["topics_truncated"] = 0
+            data["counts"]["topics_returned"] = len(topics)
     return json.dumps(data, default=str)
 
 
@@ -97,9 +117,16 @@ def _topic_sample(args, ctx=None):
         # RELIABLE and therefore sees nothing from a BEST_EFFORT publisher such as
         # a camera driver.
         data, result = obs.sample_last(t, a["topic"], a.get("seconds", 6))
-        data["ok"] = data["received"]
-        if not data["received"]:
-            data["error"] = result.error() if not result.ok else "no message in the window"
+        # sample_last omits "received" on @@ERR and on a run with no payload
+        # marker. A direct subscript there is a KeyError, which Hermes reports
+        # as a plugin crash instead of the remote error.
+        received = bool(data.get("received"))
+        data["ok"] = received
+        if not received:
+            data.setdefault(
+                "error",
+                result.error() if not result.ok else "no message in the window",
+            )
         return data, result
     return _call_requires_topic(work, args, ctx)
 
@@ -148,6 +175,10 @@ def _call_requires_topic(work, args, ctx) -> str:
         payload, result = work(target, args)
     except ValueError as exc:
         return json.dumps({"ok": False, "error": str(exc)})
+    except Exception as exc:
+        # A Hermes tool handler that raises is reported as a plugin crash, not a
+        # diagnosable answer, so every failure path has to come back as JSON.
+        return json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"})
     payload.setdefault("ok", bool(result.ok))
     payload["target"] = target.label
     payload["mode"] = target.mode

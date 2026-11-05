@@ -81,10 +81,88 @@ if suspicious:
 
 # Connectivity is not traffic: a topic can have both endpoints and still carry
 # nothing. Count actual messages over a short window so the UI can animate by
-# measured rate instead of by wiring.
+# measured rate instead of by wiring. Topics that can exceed the byte budget
+# are skipped before subscribe, and a first message over the budget is dropped
+# from the count — neither is reported as 0.0/s.
 TRAFFIC_WINDOW = 2.0
+TRAFFIC_BYTE_BUDGET = 1000000
+# Short form: "pkg/msg/Name" and "pkg/Name" both become "pkg/Name".
+_HEAVY_TYPES = {
+    "sensor_msgs/Image",
+    "sensor_msgs/CompressedImage",
+    "sensor_msgs/PointCloud2",
+    "sensor_msgs/PointCloud",
+    "sensor_msgs/LaserScan",
+    "nav_msgs/OccupancyGrid",
+    "audio_common_msgs/AudioData",
+}
+
+def _short_type(typ):
+    parts = (typ or "").split("/")
+    if len(parts) >= 3 and parts[-2] == "msg":
+        return parts[0] + "/" + parts[-1]
+    if len(parts) >= 2:
+        return parts[0] + "/" + parts[-1]
+    return typ or ""
+
+def _type_skip_reason(typ):
+    short = _short_type(typ)
+    leaf = short.rsplit("/", 1)[-1]
+    heavy = (
+        short in _HEAVY_TYPES
+        or leaf.endswith("Image")
+        or leaf.endswith("PointCloud2")
+        or leaf.endswith("OccupancyGrid")
+    )
+    if not heavy:
+        return None
+    return (
+        "message type %s can carry more than the %d-byte sampling budget, "
+        "so its rate was not measured" % (typ, TRAFFIC_BYTE_BUDGET)
+    )
+
+def _measured_bytes(msg):
+    # Sum len() of the message's byte and sequence fields.
+    total = 0
+    names = []
+    try:
+        names = list(msg.get_fields_and_field_types())
+    except Exception:
+        names = []
+    if not names:
+        for slot in getattr(msg, "__slots__", ()):
+            names.append(slot[1:] if str(slot).startswith("_") else slot)
+    for name in names:
+        try:
+            value = getattr(msg, name)
+        except Exception:
+            continue
+        if isinstance(value, (bytes, bytearray, list, tuple)):
+            total += len(value)
+    return total
+
 rates = {}
 counts = {}
+skipped = {}
+
+def _on_traffic(msg, topic_name):
+    # Destroying a subscription from inside its own callback can block the
+    # executor, so an over-budget topic is only un-counted and the node is
+    # destroyed at the end of the window. This is a deliberate trade: one
+    # window of deserialisation, never a hung graph call.
+    if topic_name not in counts:
+        return
+    if counts[topic_name] == 0:
+        measured = _measured_bytes(msg)
+        if measured > TRAFFIC_BYTE_BUDGET:
+            counts.pop(topic_name, None)
+            skipped[topic_name] = (
+                "first message measured %d bytes, over the %d-byte sampling budget"
+                % (measured, TRAFFIC_BYTE_BUDGET)
+            )
+            return
+    counts[topic_name] = counts.get(topic_name, 0) + 1
+
 try:
     from rosidl_runtime_py.utilities import get_message
     from rclpy.qos import QoSProfile
@@ -93,6 +171,10 @@ except Exception:
 if get_message is not None:
     for name, typ, pubs, subs, pinfo, sinfo in rows:
         if pubs <= 0 or name in ("/rosout", "/parameter_events"):
+            continue
+        reason = _type_skip_reason(typ)
+        if reason:
+            skipped[name] = reason
             continue
         try:
             cls = get_message(typ)
@@ -109,7 +191,7 @@ if get_message is not None:
         try:
             node.create_subscription(
                 cls, name,
-                (lambda msg, t=name: counts.__setitem__(t, counts.get(t, 0) + 1)),
+                (lambda msg, t=name: _on_traffic(msg, t)),
                 qos,
             )
         except Exception:
@@ -119,6 +201,8 @@ if get_message is not None:
         while time.time() < end:
             rclpy.spin_once(node, timeout_sec=0.05)
     for name, count in counts.items():
+        if name in skipped:
+            continue
         rates[name] = count / TRAFFIC_WINDOW
 
 total_pubs = 0
@@ -145,6 +229,8 @@ for name, typ, pubs, subs, pinfo, sinfo in rows:
         if name in latched_topics and counts.get(name, 0) <= 1:
             rate = 0.0
         print("@@R|%s|%.3f" % (name, rate))
+    if name in skipped:
+        print("@@U|%s|%s" % (name, skipped[name]))
     for role, infos in (("P", pinfo), ("S", sinfo)):
         for info in infos:
             node_name = (info.node_namespace.rstrip("/") + "/" + info.node_name).replace("//", "/")
@@ -212,7 +298,7 @@ found=$(printf '%s\n' "$FAST" | grep -c '^@@T|')
 pubs=$(printf '%s\n' "$FAST" | sed -n 's/^@@PUBS *//p' | head -1)
 want=$(printf '%s\n' "$TOPICS_OUT" | grep -c '^/')
 if [ -n "$found" ] && [ "${found:-0}" -ge "${want:-0}" ] && [ "${pubs:-0}" -gt 0 ]; then
-  printf '%s\n' "$FAST" | grep -E '^(@@T|@@E|@@D|@@R)\|'
+  printf '%s\n' "$FAST" | grep -E '^(@@T|@@E|@@D|@@R|@@U)\|'
 else
   for t in $(ros2 topic list 2>/dev/null | head -300); do
     info=$(ros2 topic info "$t" 2>/dev/null)
@@ -348,6 +434,13 @@ def parse_graph(text: str, *, include_system: bool = False) -> dict:
                 except ValueError:
                     pass
             continue
+        if line.startswith("@@U|"):
+            parts = (line.split("|", 2) + ["", "", ""])[:3]
+            _, topic_name, reason = parts
+            entry = topics.get(topic_name)
+            if entry is not None and reason:
+                entry["rate_reason"] = reason.strip()
+            continue
         if not line.startswith("@@E|"):
             continue
         parts = (line.split("|", 4) + ["", "", "", ""])[:4]
@@ -381,6 +474,7 @@ def parse_graph(text: str, *, include_system: bool = False) -> dict:
             "orphans": len(orphans),
             "system_excluded": 0 if include_system else len(withheld),
             "latched": len(latched),
+            "rate_skipped": sum(1 for t in ordered if t.get("rate_reason")),
         },
         "orphans": [{"name": t["name"], "type": t["type"], "health": t["health"],
                      "detail": t["health_text"],
@@ -410,6 +504,9 @@ def _classify(entry: dict) -> tuple[str, str]:
         return "dead_output", HEALTH_TEXT["dead_output"]
     rate = entry.get("rate_hz")
     if rate is None:
+        reason = entry.get("rate_reason")
+        if reason:
+            return "unmeasured", "rate not measured — " + reason
         # Both endpoints present but the payload carried no @@R sample (the daemon
         # fallback never measures). Wiring is not traffic: do not call this live.
         return "unmeasured", UNMEASURED_RATE_TEXT
