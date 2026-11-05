@@ -10,6 +10,7 @@ const HEALTH_COLOR = {
   dead_output: '#e6b35a',
   unmeasured: '#9aa3b5',
   state: '#6aa9ff',
+  silent: '#9b7bff',
 }
 
 const store = {
@@ -132,6 +133,7 @@ function Topology({ graph }) {
     })
   }
   const health = new Map(topics.map((t) => [t.name, t.health]))
+  const rates = new Map(topics.map((t) => [t.name, Number(t.rate_hz) || 0]))
   const names = new Set(edges.map((e) => e.node))
   for (const n of (graph && graph.nodes) || []) names.add(n)
   const nodeList = [...names].sort()
@@ -150,26 +152,28 @@ function Topology({ graph }) {
     if (y1 == null || y2 == null) return null
     const healthOf = health.get(e.topic)
     const color = HEALTH_COLOR[healthOf] || '#9aa3b5'
-    const live = healthOf === 'live'
+    const rate = rates.get(e.topic) || 0
+    // Motion is measured traffic, not wiring: the dash cycle shortens as the
+    // topic's real message rate rises, and a quiet topic (0 msg/s in the sample
+    // window) does not move at all even when both endpoints exist.
+    const moves = rate > 0 && (healthOf === 'live' || healthOf === 'silent' || healthOf === 'state')
+    const dur = moves ? Math.max(0.35, Math.min(2.4, 1.6 / Math.max(rate, 0.4))) : null
     const d =
       'M ' + LANE_L + ' ' + y1 + ' C ' + (LANE_L + 110) + ' ' + y1 + ', ' +
       (LANE_R - 110) + ' ' + y2 + ', ' + LANE_R + ' ' + y2
-    // Motion is evidence, not decoration: a dash travelling along the edge is a
-    // topic whose publishers and subscribers are actually connected. Dead and
-    // latched edges stay still, so movement always means data is moving.
     return jsxs('path', {
       d,
       fill: 'none',
       stroke: color,
-      'stroke-width': live ? 1.8 : 1.2,
-      'stroke-dasharray': live ? '7 7' : e.role === 'publisher' ? '0' : '4 3',
-      opacity: live ? 0.9 : 0.55,
-      children: live
+      'stroke-width': moves ? 1.8 : 1.2,
+      'stroke-dasharray': moves ? '7 7' : e.role === 'publisher' ? '0' : '4 3',
+      opacity: moves ? 0.9 : 0.55,
+      children: moves
         ? jsx('animate', {
             attributeName: 'stroke-dashoffset',
             from: '0',
             to: '-28',
-            dur: '1.1s',
+            dur: dur.toFixed(2) + 's',
             repeatCount: 'indefinite',
           })
         : null,
@@ -210,7 +214,7 @@ function Topology({ graph }) {
                   y: String(topicY.get(t) + 4),
                   'font-size': '11',
                   fill: 'var(--ui-text-secondary)',
-                  children: t,
+                  children: t + ' · ' + (rates.get(t) ? rates.get(t).toFixed(1) + '/s' : 'no traffic'),
                 }, 't' + t),
               ],
             }, 'g' + t)
@@ -229,7 +233,7 @@ function GraphTable({ graph }) {
     children: [
       jsx('thead', {
         children: jsxs('tr', {
-          children: ['topic', 'type', 'pub', 'sub', 'health'].map((label) =>
+          children: ['topic', 'type', 'pub', 'sub', 'msg/s', 'health'].map((label) =>
             jsx('th', {
               style: {
                 textAlign: 'left',
@@ -258,6 +262,13 @@ function GraphTable({ graph }) {
               jsx('td', {
                 style: { padding: '2px 6px', fontFamily: 'ui-monospace, monospace' },
                 children: String(topic.subscribers),
+              }),
+              jsx('td', {
+                style: { padding: '2px 6px', fontFamily: 'ui-monospace, monospace' },
+                children:
+                  topic.rate_hz == null
+                    ? '—'
+                    : Number(topic.rate_hz).toFixed(Number(topic.rate_hz) >= 10 ? 0 : 1),
               }),
               jsx('td', {
                 style: {

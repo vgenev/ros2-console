@@ -207,3 +207,38 @@ def test_unnamed_participants_are_not_rendered_as_raw_unknown_tokens():
     )
     parsed = parse_graph(text)
     assert any(e["node"] == "<unnamed participant>" for e in parsed["edges"])
+
+
+TRAFFIC_TEXT = """@@DISTRO jazzy
+@@RMW
+@@NODES
+/cam
+@@TOPICS
+/cam/image [sensor_msgs/msg/Image]
+/events [std_msgs/msg/String]
+@@DETAIL
+@@T|/cam/image|1|1|sensor_msgs/msg/Image
+@@R|/cam/image|30.500
+@@E|/cam/image|P|/cam|sensor_msgs/msg/Image
+@@E|/cam/image|S|/viewer|sensor_msgs/msg/Image
+@@T|/events|1|1|std_msgs/msg/String
+@@R|/events|0.000
+@@E|/events|P|/cam|std_msgs/msg/String
+@@E|/events|S|/logger|std_msgs/msg/String
+@@END
+"""
+
+
+def test_measured_traffic_reaches_the_payload():
+    parsed = parse_graph(TRAFFIC_TEXT)
+    by_name = {t["name"]: t for t in parsed["topics"]}
+    assert by_name["/cam/image"]["rate_hz"] == 30.5
+    assert by_name["/cam/image"]["health"] == "live"
+
+
+def test_connected_but_silent_is_its_own_state():
+    """Wiring can be perfect while nothing flows; that is a different finding."""
+    parsed = parse_graph(TRAFFIC_TEXT)
+    by_name = {t["name"]: t for t in parsed["topics"]}
+    assert by_name["/events"]["health"] == "silent"
+    assert parsed["counts"]["orphans"] == 0

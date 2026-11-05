@@ -79,11 +79,72 @@ if suspicious:
         except Exception:
             pass
 
+# Connectivity is not traffic: a topic can have both endpoints and still carry
+# nothing. Count actual messages over a short window so the UI can animate by
+# measured rate instead of by wiring.
+TRAFFIC_WINDOW = 2.0
+rates = {}
+counts = {}
+try:
+    from rosidl_runtime_py.utilities import get_message
+    from rclpy.qos import QoSProfile
+except Exception:
+    get_message = None
+if get_message is not None:
+    for name, typ, pubs, subs, pinfo, sinfo in rows:
+        if pubs <= 0 or name in ("/rosout", "/parameter_events"):
+            continue
+        try:
+            cls = get_message(typ)
+        except Exception:
+            continue
+        qos = QoSProfile(depth=10)
+        if pinfo:
+            try:
+                qos.reliability = pinfo[0].qos_profile.reliability
+                qos.durability = pinfo[0].qos_profile.durability
+            except Exception:
+                pass
+        counts[name] = 0
+        try:
+            node.create_subscription(
+                cls, name,
+                (lambda msg, t=name: counts.__setitem__(t, counts.get(t, 0) + 1)),
+                qos,
+            )
+        except Exception:
+            counts.pop(name, None)
+    if counts:
+        end = time.time() + TRAFFIC_WINDOW
+        while time.time() < end:
+            rclpy.spin_once(node, timeout_sec=0.05)
+    for name, count in counts.items():
+        rates[name] = count / TRAFFIC_WINDOW
+
 total_pubs = 0
+latched_topics = set()
+for name, typ, pubs, subs, pinfo, sinfo in rows:
+    for info in pinfo:
+        try:
+            raw = info.qos_profile.durability
+            label = getattr(raw, "name", None) or str(raw)
+            if str(label).split(".")[-1].upper() in ("TRANSIENT_LOCAL", "TRANSIENT"):
+                latched_topics.add(name)
+                break
+        except Exception:
+            pass
 for name, typ, pubs, subs, pinfo, sinfo in rows:
     if pubs > 0:
         total_pubs += pubs
     print("@@T|%s|%s|%s|%s" % (name, pubs, subs, typ))
+    if name in rates:
+        rate = rates[name]
+        # A latched publisher replays its stored sample to a new subscriber, so one
+        # message in the window is delivery of state, not a 0.5 Hz stream. Report
+        # zero traffic for it instead of inventing a rate.
+        if name in latched_topics and counts.get(name, 0) <= 1:
+            rate = 0.0
+        print("@@R|%s|%.3f" % (name, rate))
     for role, infos in (("P", pinfo), ("S", sinfo)):
         for info in infos:
             node_name = (info.node_namespace.rstrip("/") + "/" + info.node_name).replace("//", "/")
@@ -126,7 +187,7 @@ found=$(printf '%s\n' "$FAST" | grep -c '^@@T|')
 pubs=$(printf '%s\n' "$FAST" | sed -n 's/^@@PUBS *//p' | head -1)
 want=$(printf '%s\n' "$TOPICS_OUT" | grep -c '^/')
 if [ -n "$found" ] && [ "${found:-0}" -ge "${want:-0}" ] && [ "${pubs:-0}" -gt 0 ]; then
-  printf '%s\n' "$FAST" | grep -E '^(@@T|@@E|@@D)\|'
+  printf '%s\n' "$FAST" | grep -E '^(@@T|@@E|@@D|@@R)\|'
 else
   for t in $(ros2 topic list 2>/dev/null | head -300); do
     info=$(ros2 topic info "$t" 2>/dev/null)
@@ -150,6 +211,8 @@ HEALTH_TEXT = {
     "unmeasured": "publisher/subscriber counts unavailable (permissions or a slow host)",
     "state": "latched state topic: publishes on change and a late subscriber still receives "
              "the current value, so no subscriber yet is not a fault",
+    "silent": "endpoints are connected but no message arrived during the sample window — "
+              "wiring is fine, traffic is not",
 }
 
 # Durability that makes "nobody subscribed right now" a non-event: the publisher
@@ -215,6 +278,16 @@ def parse_graph(text: str, *, include_system: bool = False) -> dict:
             if entry is not None and durability:
                 entry["durability"] = durability.upper()
             continue
+        if line.startswith("@@R|"):
+            parts = (line.split("|", 2) + ["", "", ""])[:3]
+            _, topic_name, rate = parts
+            entry = topics.get(topic_name)
+            if entry is not None and rate:
+                try:
+                    entry["rate_hz"] = float(rate)
+                except ValueError:
+                    pass
+            continue
         if not line.startswith("@@E|"):
             continue
         parts = (line.split("|", 4) + ["", "", "", ""])[:4]
@@ -268,6 +341,8 @@ def _classify(entry: dict) -> tuple[str, str]:
         if str(entry.get("durability") or "").upper() in LATCHED_DURABILITY:
             return "state", HEALTH_TEXT["state"]
         return "dead_output", HEALTH_TEXT["dead_output"]
+    if entry.get("rate_hz") == 0:
+        return "silent", HEALTH_TEXT["silent"]
     return "live", HEALTH_TEXT["live"]
 
 
