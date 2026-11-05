@@ -1,0 +1,15 @@
+Type: std_msgs/msg/String
+Publisher count: 1
+Subscription count: 1
+@@DISTRO jazzy
+@@RMW default
+@@NODES
+/talker
+/listener
+@@TOPICS
+/chatter [std_msgs/msg/String]
+/spare/status [std_msgs/msg/String]
+@@DETAIL
+@@T|/chatter|1|1|std_msgs/msg/String
+@@T|/spare/status|?|?|std_msgs/msg/String
+@@END

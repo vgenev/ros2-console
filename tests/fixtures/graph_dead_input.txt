@@ -1,0 +1,26 @@
+@@DISTRO jazzy
+@@RMW default
+@@NODES
+/board_telemetry
+/depth_filter
+/inspection_camera
+/inspection_verdict
+/listener
+/talker
+@@TOPICS
+/board/temperature [std_msgs/msg/Float32]
+/camera/image_raw/compressed [sensor_msgs/msg/CompressedImage]
+/chatter [std_msgs/msg/String]
+/depth/points/compressed [sensor_msgs/msg/CompressedImage]
+/inspection/verdict [std_msgs/msg/String]
+/parameter_events [rcl_interfaces/msg/ParameterEvent]
+/rosout [rcl_interfaces/msg/Log]
+@@DETAIL
+@@T|/board/temperature|1|0|std_msgs/msg/Float32
+@@T|/camera/image_raw/compressed|1|1|sensor_msgs/msg/CompressedImage
+@@T|/chatter|1|1|std_msgs/msg/String
+@@T|/depth/points/compressed|0|1|sensor_msgs/msg/CompressedImage
+@@T|/inspection/verdict|1|0|std_msgs/msg/String
+@@T|/parameter_events|7|0|rcl_interfaces/msg/ParameterEvent
+@@T|/rosout|7|0|rcl_interfaces/msg/Log
+@@END
