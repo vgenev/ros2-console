@@ -1,0 +1,7 @@
+{
+  "name": "ros2-console",
+  "label": "ROS 2",
+  "description": "Live ROS 2 graph, orphan topics, and a camera frame.",
+  "version": "0.1.0",
+  "api": "plugin_api.py"
+}
