@@ -1,0 +1,48 @@
+name: ros2-console
+label: ROS 2 Console
+version: 0.1.0
+description: >
+  Operate a live ROS 2 robot or edge board from Hermes: topic graph with
+  publisher/subscriber health, measured rates, bounded message samples and
+  camera snapshots. Talks to the robot over SSH with its own CLI — nothing is
+  installed on the target, and no credentials are held by the plugin.
+author: vgenev
+license: MIT
+manifest_version: 1
+requires_hermes: ">=0.22.0"
+kind: standalone
+toolset: ros2
+provides_tools:
+  - ros2_host_status
+  - ros2_graph
+  - ros2_topic_rate
+  - ros2_topic_sample
+  - ros2_camera_snapshot
+provides_hooks: []
+provides_middleware: []
+requires_env: []
+config_schema:
+  host:
+    type: string
+    default: ""
+    description: >
+      SSH target for the robot, e.g. "robot@192.168.1.50" or a Tailscale name.
+      Empty means run locally on a machine that already has ROS 2 sourced.
+    required: false
+  distro:
+    type: string
+    default: jazzy
+    description: ROS 2 distribution to source on the target ({/opt/ros/<distro>/setup.bash}).
+    required: false
+  setup:
+    type: string
+    default: ""
+    description: >
+      Optional extra script to source after the distro (a workspace's
+      install/setup.bash), for custom message types.
+    required: false
+  timeout:
+    type: int
+    default: 15
+    description: Per-command timeout in seconds.
+    required: false
