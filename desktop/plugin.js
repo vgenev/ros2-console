@@ -557,7 +557,9 @@ function TopicTip({ tip, onClose }) {
 
 function Pane({ ctx, bus }) {
   const snap = useStore()
-  const [polling, setPolling] = useState(false)
+  // Polling is on by default: the page exists to show a live robot, and a
+  // static snapshot is the less useful first impression.
+  const [polling, setPolling] = useState(true)
   const [topic, setTopic] = useState(() => {
     try {
       return ctx.storage.get('cameraTopic', '') || DEFAULT_TOPIC
@@ -634,6 +636,14 @@ function Pane({ ctx, bus }) {
       /* the field still works for this session */
     }
   }
+
+  // Start polling when the page is opened and stop when it is left, so nothing
+  // reads a robot in the background for a page nobody is looking at.
+  useEffect(() => {
+    bus.setPolling(true)
+    bus.refresh()
+    return () => bus.setPolling(false)
+  }, [])
 
   useEffect(() => {
     if (!tip || !tip.pinned) return undefined
