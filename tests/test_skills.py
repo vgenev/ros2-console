@@ -10,6 +10,7 @@ reported clean.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 from pathlib import Path
@@ -20,9 +21,22 @@ ROOT = Path(__file__).resolve().parent.parent
 SKILLS = ROOT / "skills"
 SELF = Path(__file__).resolve()
 
-# Spell the strings out here and nowhere else: the guard has to fail on these
-# exact words, so this tuple is the one place in the tree that carries them.
-FORBIDDEN = ("example_cell", "example_ws", "example_prefix", "example_org", "example_board", "example_contact")
+# Hashes, not words. A deny-list spelled out in the tree IS the disclosure — a
+# guard that names the client material it forbids publishes it in the same
+# commit it protects. Each entry is sha256 of one lowercase token that must
+# never appear in a tracked file; the guard hashes every token it reads.
+FORBIDDEN_SHA256 = frozenset({
+    "0066e522e4422330be8c766d722e11bfd4039d5b29b45169a5da10aa47e39b18",
+    "436a4d345640f1b4333dd5730bb58a2974dce201b19349e95da634ccd5891b32",
+    "4a1a1c98936e3f372bee3ccbae203b3c1f683a6dba5fa9cc0bf0cab989a3b717",
+    "6b065c28f5e849ddc8edcdb8986a7f186dd053c684858f8ec1744c3667aabf83",
+    "8a4bbb4c769876bf349a2a53bcff3358cdcc4b959be0832872dad0a2059cf954",
+    "a56100fc4a21ccff0083ace08e2d2cddbef44b04ec5117852ed5e8ebab6227e2",
+})
+
+
+def _is_forbidden(token: str) -> bool:
+    return hashlib.sha256(token.encode()).hexdigest() in FORBIDDEN_SHA256
 
 
 def _skill_dirs():
@@ -107,10 +121,9 @@ def _tracked_text_files():
 def test_no_tracked_file_carries_client_or_project_material():
     offenders = []
     for name, text in _tracked_text_files():
-        lowered = text.lower()
-        for word in FORBIDDEN:
-            # Word-start match, so a topic such as `/demo/<word>` is caught while
-            # an unrelated word that merely contains the letters is not.
-            if re.search(rf"(?<![a-z0-9]){re.escape(word)}", lowered):
-                offenders.append((name, word))
+        for token in set(re.findall(r"[a-z0-9_]+", text.lower())):
+            if _is_forbidden(token):
+                # Report the FILE and a token hash — printing the token here
+                # would re-publish the very word the guard exists to keep out.
+                offenders.append((name, hashlib.sha256(token.encode()).hexdigest()[:12]))
     assert offenders == [], f"client material leaked into the tree: {offenders}"
