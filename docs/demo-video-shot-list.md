@@ -7,10 +7,13 @@ private engagement and do not belong in a public repo.
 
 ## The one argument
 
-> Every ROS 2 dashboard you have used tells you a latched topic is dead. It is not
-> dead. Here is a tool that tells the difference, and shows its evidence.
+> Hermes knows this robot intimately: it reads the whole graph, measures the
+> traffic on every wire, and can tell a topic that is quiet from one that is
+> holding a value for whoever asks next — and it shows the evidence it used.
 
-Everything that does not serve that sentence is cut.
+Everything that does not serve that sentence is cut. Nothing in the video claims
+anything about other tools; the subject is what this one can see, and how you can
+check it.
 
 ## Why that argument
 
@@ -21,18 +24,19 @@ Everything that does not serve that sentence is cut.
 | `/depth/points/compressed` 0 pubs / 4 subs | `dead_input` | subscribers waiting on nothing |
 | `/board/temperature` 1 pub / 0 sub, VOLATILE | `dead_output` | data flowing into a bin |
 
-The last two rows exist so the video cannot be accused of "everything is fine":
-the tool reports the real orphans and says so.
+The last two rows are there because knowing a robot intimately means knowing what
+is broken about it too: the tool reports the real orphans instead of presenting a
+clean picture.
 
 ## Shot list
 
 | # | Time | On screen | Action | Burned-in caption |
 |---|---|---|---|---|
 | 1 | 0:00–0:06 | desktop app, ROS 2 pane, topology already drawn | still frame, no motion | "A latched topic. 1 publisher. 0 subscribers." |
-| 2 | 0:06–0:09 | same | cursor moves to the `session/status` node | "…marked dead by every dashboard." |
+| 2 | 0:06–0:09 | same | cursor moves to the `session/status` node | "Nothing on this wire looks like it is carrying anything." |
 | 3 | 0:09–0:16 | pane | click **Refresh** — topology redraws | "One call reads the whole graph" |
 | 4 | 0:16–0:28 | pane | hover `/session/status`, then **click to pin**; the card shows the retained JSON | "Retained value, replayed. TRANSIENT_LOCAL → `state`, not `orphan`." |
-| 5 | 0:28–0:36 | pane | hover `/chatter`; dashes speed up; card shows a String sample | "Motion is measured — not 'it's connected, so it works'" |
+| 5 | 0:28–0:36 | pane | hover `/chatter`; dashes speed up; card shows a String sample | "Motion is the measured rate, not an assumption" |
 | 6 | 0:36–0:44 | pane | hover `/depth/points/compressed` then `/board/temperature` | "0 publishers, 4 subscribers. Real orphans — it says so." |
 | 7 | 0:44–0:56 | pane | **Grab frame** → JPEG appears | "One call: a JPEG. A raw Image is decoded on the robot." |
 | 8 | 0:56–1:10 | chat | ask `ros2_docs`: why does transient-local durability matter? → answer cites repo and commit | "Answers carry the repo and commit they came from." |
