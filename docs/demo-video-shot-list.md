@@ -7,9 +7,12 @@ private engagement and do not belong in a public repo.
 
 ## The one argument
 
-> Hermes knows this robot intimately: it reads the whole graph, measures the
-> traffic on every wire, and can tell a topic that is quiet from one that is
-> holding a value for whoever asks next — and it shows the evidence it used.
+> **Your robot is talking. Hermes tells you who's listening.**
+
+Then, under it in the post:
+
+> Hermes connects to a live robot and shows you what's actually flowing — and
+> what isn't.
 
 Everything that does not serve that sentence is cut. Nothing in the video claims
 anything about other tools; the subject is what this one can see, and how you can
@@ -33,14 +36,14 @@ clean picture.
 | # | Time | On screen | Action | Burned-in caption |
 |---|---|---|---|---|
 | 1 | 0:00–0:06 | desktop app, ROS 2 pane, topology already drawn | still frame, no motion | "A latched topic. 1 publisher. 0 subscribers." |
-| 2 | 0:06–0:09 | same | cursor moves to the `session/status` node | "Nothing on this wire looks like it is carrying anything." |
+| 2 | 0:06–0:09 | same | cursor moves to the `session/status` node | "Nobody listening — and it is still holding a message." |
 | 3 | 0:09–0:16 | pane | click **Refresh** — topology redraws | "One call reads the whole graph" |
 | 4 | 0:16–0:28 | pane | hover `/session/status`, then **click to pin**; the card shows the retained JSON | "Retained value, replayed. TRANSIENT_LOCAL → `state`, not `orphan`." |
 | 5 | 0:28–0:36 | pane | hover `/chatter`; dashes speed up; card shows a String sample | "Motion is the measured rate, not an assumption" |
 | 6 | 0:36–0:44 | pane | hover `/depth/points/compressed` then `/board/temperature` | "0 publishers, 4 subscribers. Real orphans — it says so." |
 | 7 | 0:44–0:56 | pane | **Grab frame** → JPEG appears | "One call: a JPEG. A raw Image is decoded on the robot." |
 | 8 | 0:56–1:10 | chat | ask `ros2_docs`: why does transient-local durability matter? → answer cites repo and commit | "Answers carry the repo and commit they came from." |
-| 9 | 1:10–1:24 | end card | plugin name, tool count, install line | `hermes plugins install ros2-console` |
+| 9 | 1:10–1:24 | end card | plugin name, tool count, install line | "Your robot is talking. Hermes tells you who's listening." |
 
 If it runs long, cut beat 6 to 4 s and beat 8 to 10 s. Never cut beat 4 — it is the
 entire submission.
