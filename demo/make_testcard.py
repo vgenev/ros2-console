@@ -29,8 +29,8 @@ from PIL import Image, ImageDraw, ImageFont
 # bundled camera node actually publishes, so the picture cannot contradict the
 # stream it is sent on.
 HEADER = "CAMERA TEST CARD"
-CENTER = "TARGET"
-FOOTER = "ROS 2 | 400x300 | 2 Hz"
+CENTER = "NOUS"
+FOOTER = "HERMES AGENT | ROS 2 | 400x300 | 2 Hz"
 
 # --- frame geometry, shared with demo/nodes.py ----------------------------
 WIDTH, HEIGHT = 400, 300  # a raw rgb8 frame at this size is 360,000 B
@@ -47,9 +47,10 @@ OUTPUT = Path(__file__).with_name("testcard.jpg")
 CENTER_XY = (WIDTH // 2, HEIGHT // 2)
 OUTER_R = 110
 INNER_R = 70
-BOX = (120, 60)  # target rectangle, width x height
+FRAME_INSET = 3  # accent border, drawn outside the wordmark so nothing crosses the letters
 CROSS_REACH = 160  # crosshair arm length, each way from the centre
 TEXT_SCALE = 2  # built-in bitmap font, nearest-neighbour upscaled
+MARK_SCALE = 9  # the CENTER wordmark, large enough to be read in a 400px frame
 
 
 def _grid(draw: ImageDraw.ImageDraw) -> None:
@@ -59,7 +60,7 @@ def _grid(draw: ImageDraw.ImageDraw) -> None:
         draw.line(((0, y), (WIDTH - 1, y)), fill=GRID, width=1)
 
 
-def _text(image: Image.Image, xy: tuple[int, int], text: str, fill=INK) -> None:
+def _text(image: Image.Image, xy: tuple[int, int], text: str, fill=INK, scale=TEXT_SCALE) -> None:
     """Paste text drawn with Pillow's built-in bitmap font, scaled up crisply.
 
     A system TTF would make the output depend on whatever fonts the host has;
@@ -72,17 +73,17 @@ def _text(image: Image.Image, xy: tuple[int, int], text: str, fill=INK) -> None:
     patch = Image.new("RGB", (max(1, right - left), max(1, bottom - top)), BACKGROUND)
     ImageDraw.Draw(patch).text((-left, -top), text, font=base, fill=fill)
     patch = patch.resize(
-        (patch.width * TEXT_SCALE, patch.height * TEXT_SCALE), Image.Resampling.NEAREST
+        (patch.width * scale, patch.height * scale), Image.Resampling.NEAREST
     )
     # Only the glyph pixels land on the card, so the grid shows through the gaps.
     mask = patch.convert("L").point([0 if value <= 40 else 255 for value in range(256)])
     image.paste(patch, xy, mask)
 
 
-def _text_width(text: str) -> int:
+def _text_width(text: str, scale: int = TEXT_SCALE) -> int:
     """Pixel width of `text` once scaled, for centring captions."""
     left, _, right, _ = (int(v) for v in ImageFont.load_default().getbbox(text))
-    return (right - left) * TEXT_SCALE
+    return (right - left) * scale
 
 
 def build() -> Image.Image:
@@ -101,9 +102,12 @@ def build() -> Image.Image:
         box = (cx - radius, cy - radius, cx + radius, cy + radius)
         draw.ellipse(box, outline=INK, width=1)
 
-    # Target rectangle: the region a detector would report.
-    half_w, half_h = BOX[0] // 2, BOX[1] // 2
-    draw.rectangle((cx - half_w, cy - half_h, cx + half_w, cy + half_h), outline=ACCENT, width=2)
+    # Accent frame: the image border, so the card reads as a captured frame.
+    draw.rectangle(
+        (FRAME_INSET, FRAME_INSET, WIDTH - 1 - FRAME_INSET, HEIGHT - 1 - FRAME_INSET),
+        outline=ACCENT,
+        width=2,
+    )
 
     # Corner framing ticks, no text.
     for ox, oy, sx, sy in (
@@ -118,7 +122,24 @@ def build() -> Image.Image:
     # Captions: neutral header, centre label, and the footer that names
     # framework, resolution and rate.
     _text(image, (14, 12), HEADER)
-    _text(image, (cx - _text_width(CENTER) // 2, cy + INNER_R + 8), CENTER)
+    # A plate behind the wordmark: the reticle is a HUD, and a HUD drawn through
+    # a logo reads as noise. The band is part of the card, not an overlay.
+    mark_w = _text_width(CENTER, MARK_SCALE)
+    _, mark_top, _, mark_bottom = (
+        int(v) * MARK_SCALE for v in ImageFont.load_default().getbbox(CENTER)
+    )
+    mark_h = mark_bottom - mark_top
+    pad = 10
+    draw.rectangle(
+        (
+            cx - mark_w // 2 - pad,
+            cy - mark_h // 2 - pad,
+            cx + mark_w // 2 + pad,
+            cy + mark_h // 2 + pad,
+        ),
+        fill=BACKGROUND,
+    )
+    _text(image, (cx - mark_w // 2, cy - mark_h // 2), CENTER, scale=MARK_SCALE)
     _text(image, (cx - _text_width(FOOTER) // 2, HEIGHT - 26), FOOTER)
 
     return image
