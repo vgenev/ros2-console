@@ -8,6 +8,13 @@ numpy, at call time, inside the shipped script.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
+# Host-side default for the traffic window. The script that runs on the robot has
+# its own TRAFFIC_WINDOW (it is embedded in that script's source, not in this
+# module); this mirrors it for parsing a capture that predates provenance fields.
+MEASURED_WINDOW_DEFAULT = 2.0
+
 import inspect
 import re
 import shlex
@@ -229,7 +236,11 @@ for name, typ, pubs, subs, pinfo, sinfo in rows:
         # zero traffic for it instead of inventing a rate.
         if name in latched_topics and counts.get(name, 0) <= 1:
             rate = 0.0
-        print("@@R|%s|%.3f" % (name, rate))
+        # The rate is emitted with the evidence that produced it: how many
+        # messages, over what window, and when. ROS 2 publishes no telemetry, so
+        # a number without these fields is an assertion, not a measurement.
+        print("@@R|%s|%.3f|%d|%.1f|%.0f" % (
+            name, rate, counts.get(name, 0), TRAFFIC_WINDOW, time.time()))
     if name in skipped:
         print("@@U|%s|%s" % (name, skipped[name]))
     for role, infos in (("P", pinfo), ("S", sinfo)):
@@ -387,6 +398,27 @@ def _discovery(text: str) -> tuple[bool, str | None]:
                    "never answered — the ROS environment is not sourced there")
 
 
+def _float_or_none(raw: str, fallback: float | None = None) -> float | None:
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _int_or_none(raw: str) -> int | None:
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def _iso_or_none(raw: str) -> str | None:
+    try:
+        return datetime.fromtimestamp(float(raw), tz=timezone.utc).isoformat(timespec="seconds")
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+
+
 def parse_graph(text: str, *, include_system: bool = False) -> dict:
     sections = _split_sections(text)
     head = sections.get("head") or []
@@ -426,14 +458,23 @@ def parse_graph(text: str, *, include_system: bool = False) -> dict:
                 entry["durability"] = durability.upper()
             continue
         if line.startswith("@@R|"):
-            parts = (line.split("|", 2) + ["", "", ""])[:3]
-            _, topic_name, rate = parts
+            parts = (line.split("|", 5) + [""] * 6)[:6]
+            _, topic_name, rate, msgs, window, at = parts
             entry = topics.get(topic_name)
             if entry is not None and rate:
                 try:
                     entry["rate_hz"] = float(rate)
                 except ValueError:
-                    pass
+                    continue
+                # Provenance is part of the value: a rate nobody can attribute is
+                # not evidence. Fields absent from an older capture are reported
+                # as unstated rather than filled in with a plausible guess.
+                entry["measured"] = {
+                    "method": "subscribe+count",
+                    "window_s": _float_or_none(window, MEASURED_WINDOW_DEFAULT),
+                    "msgs": _int_or_none(msgs),
+                    "at": _iso_or_none(at),
+                }
             continue
         if line.startswith("@@U|"):
             parts = (line.split("|", 2) + ["", "", ""])[:3]

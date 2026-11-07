@@ -435,3 +435,59 @@ def test_the_documented_encoding_list_names_yuyv():
     assert listed in SNAPSHOT_SCRIPT
     assert listed in Path(ros2_console.tools.__file__).read_text()
     assert listed in skill.read_text()
+
+
+# --- provenance -------------------------------------------------------------
+# ROS 2 publishes no telemetry: every rate in this plugin exists because the
+# plugin subscribed and counted. These tests keep that fact attached to the
+# number instead of leaving it in a docstring.
+
+PROVENANCE_TEXT = """@@DISTRO jazzy
+@@RMW default
+@@NODES
+/talker
+@@TOPICS
+/chatter [std_msgs/msg/String]
+/session/status [std_msgs/msg/String]
+@@DETAIL
+@@T|/chatter|1|1|std_msgs/msg/String
+@@T|/session/status|1|0|std_msgs/msg/String
+@@D|/session/status|TRANSIENT_LOCAL
+@@R|/chatter|10.040|20|2.0|1794000000
+@@R|/session/status|0.000|1|2.0|1794000000
+@@DISCOVERY OK
+@@END
+"""
+
+
+def _by_name(text: str) -> dict:
+    return {t["name"]: t for t in parse_graph(text)["topics"]}
+
+
+def test_a_rate_carries_the_evidence_that_produced_it():
+    topics = _by_name(PROVENANCE_TEXT)
+    assert topics["/chatter"]["rate_hz"] == 10.04
+    measured = topics["/chatter"]["measured"]
+    assert measured["method"] == "subscribe+count"
+    assert measured["window_s"] == 2.0
+    assert measured["msgs"] == 20
+    assert measured["at"].startswith("2026-11-0")  # UTC, ISO-8601
+
+
+def test_a_rate_without_evidence_is_marked_unstated_rather_than_guessed():
+    legacy = PROVENANCE_TEXT.replace("|10.040|20|2.0|1794000000", "|10.040")
+    topics = _by_name(legacy)
+    measured = topics["/chatter"]["measured"]
+    assert measured["msgs"] is None
+    assert measured["at"] is None
+    # the window falls back to the compile-time constant, and the number is still reported
+    assert measured["window_s"] == 2.0
+    assert topics["/chatter"]["rate_hz"] == 10.04
+
+
+def test_no_topic_can_carry_a_rate_without_a_measured_block():
+    for fixture in (HEALTHY, DEAD):
+        for entry in parse_graph(fixture.read_text())["topics"]:
+            name = entry["name"]
+            if "rate_hz" in entry:
+                assert "measured" in entry, f"{name} has a rate and no provenance"
