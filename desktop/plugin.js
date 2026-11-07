@@ -6,10 +6,11 @@ const DEFAULT_TOPIC = '/camera/image_raw/compressed'
 
 // A read costs 11-12s on the board, so polling has to be slower than a read;
 // anything faster only queues work and repaints.
-// A graph read costs 14-18s on the board with a colour publisher running, so a
-// 15s poll means the next read starts before the last one finished: the pane is
-// permanently mid-read and every timeout blanks it. Poll slower than a read.
-const POLL_MS = 30000
+// A graph read costs 14-18s on the board with a colour publisher running, so any
+// poll faster than that keeps the pane permanently mid-read and puts every client
+// timeout on the failure path. One read a minute is 27% duty on a diagnostic pane
+// nobody is timing, and the traffic window it reports is 2s regardless.
+const POLL_MS = 60000
 
 // Animation cycles are quantised: a small rate change between polls would
 // otherwise produce a new dur value, restart the SMIL animation, and read as a
