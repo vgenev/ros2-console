@@ -670,12 +670,43 @@ def rate(target: Target, topic: str, seconds: int = 6, window: int = 30) -> tupl
 
 # -------------------------------------------------------------------------- camera
 
-def yuyv_to_rgb(yuy2, height, width, step, max_width=480):
+JPEG_B64_BUDGET = 170_000  # characters of base64, inside the transport cap
+
+
+def encode_jpeg(img, budget: int = JPEG_B64_BUDGET):
+    """Encode at native size, flexing quality (not resolution) to fit the budget.
+
+    The transport refuses a truncated capture, and a cut base64 block is a corrupt
+    image rather than a smaller one. Resolution is what a dashboard reader needs;
+    JPEG quality is the thing that can give way. 4:2:0 subsampling is dropped at the
+    top rung because it is most of what makes chroma edges look muddy in a small tile.
+    """
+    import io
+
+    ladder = ((92, 0), (88, 2), (82, 2), (74, 2), (64, 2))
+    encoded, chosen = b"", ladder[-1][0]
+    for quality, subsampling in ladder:
+        out = io.BytesIO()
+        if img.mode == "RGB":
+            img.save(out, format="JPEG", quality=quality, subsampling=subsampling)
+        else:
+            img.save(out, format="JPEG", quality=quality)
+        encoded, chosen = out.getvalue(), quality
+        if len(encoded) * 4 // 3 <= budget:
+            break
+    return encoded, chosen
+
+
+def yuyv_to_rgb(yuy2, height, width, step, max_width=None):
     """YUYV/YUY2 (4:2:2) -> (h, w, 3) uint8 RGB, downscaling BEFORE the colour maths.
 
     numpy only, on purpose: this source is also shipped to the robot (see SNAPSHOT_SCRIPT),
-    which has numpy and Pillow but not OpenCV. Decimation drops whole chroma pairs (the 4:2:2
-    sample unit), so a 640x480 frame thumbnail costs 320x240 of arithmetic, not 640x480.
+    which has numpy and Pillow but not OpenCV.
+
+    max_width=None keeps the frame at native size, which is what a snapshot wants: the caller
+    asked for one picture, not a stream, so the colour maths is paid once per request. Decimation
+    exists for a caller that has to fit many frames through a slow link; it drops whole chroma
+    pairs (the 4:2:2 sample unit) and therefore costs resolution and sharpness, never CPU alone.
     """
     import numpy as np
 
@@ -687,7 +718,7 @@ def yuyv_to_rgb(yuy2, height, width, step, max_width=480):
     pairs = buf[: height * step].reshape(height, step)[:, : (width // 2) * 4]
     pairs = pairs.reshape(height, width // 2, 4)
     col_step = row_step = 1
-    while width // col_step > max_width:
+    while max_width and width // col_step > max_width:
         col_step *= 2
         row_step *= 2
     pairs = pairs[::row_step, ::col_step]
@@ -759,6 +790,7 @@ if is_raw:
         sys.exit(3)
 
 
+@@ENCODER@@
 @@DECODER@@
 def handle_compressed(msg):
     box["data"] = bytes(msg.data)
@@ -777,7 +809,7 @@ def handle_raw(msg):
         box["err"] = "truncated payload: %d bytes for %dx%d step %d" % (buf.size, h, w, step)
         return
     if msg.encoding == "yuyv":
-        img = Image.fromarray(yuyv_to_rgb(bytes(msg.data), h, w, step), mode="RGB")
+        img = Image.fromarray(yuyv_to_rgb(bytes(msg.data), h, w, step), mode="RGB")  # native size
     elif channels is None:
         box["err"] = ("unsupported encoding %s (rgb8, bgr8, rgba8, bgra8, mono8, yuyv)"
                       % msg.encoding)
@@ -791,9 +823,7 @@ def handle_raw(msg):
             if msg.encoding in ("bgr8", "bgra8"):
                 arr = arr[:, :, [2, 1, 0] + ([3] if channels == 4 else [])]
             img = Image.fromarray(arr[:, :, :3], mode="RGB")
-    out = io.BytesIO()
-    img.save(out, format="JPEG", quality=85)
-    box["data"] = out.getvalue()
+    box["data"], box["quality"] = encode_jpeg(img)
     box["format"] = "jpeg"
     box["source"] = "%s %dx%d %s" % (msg.encoding, w, h, msg_type.split("/")[-1])
     box["stamp"] = f"{msg.header.stamp.sec}.{msg.header.stamp.nanosec:09d}"
@@ -824,10 +854,15 @@ print("@@SOURCE " + str(box.get("source", box["format"])))
 print("@@FORMAT " + str(box["format"]))
 print("@@STAMP " + box["stamp"])
 print("@@BYTES %d" % len(box["data"]))
+print("@@QUALITY %s" % box.get("quality", "?"))
 print("@@B64 " + base64.b64encode(box["data"]).decode("ascii"))
 '''
 
-SNAPSHOT_SCRIPT = SNAPSHOT_BODY.replace("@@DECODER@@", inspect.getsource(yuyv_to_rgb))
+SNAPSHOT_SCRIPT = (
+    SNAPSHOT_BODY.replace("@@DECODER@@", inspect.getsource(yuyv_to_rgb))
+    .replace("@@ENCODER@@", inspect.getsource(encode_jpeg).replace(
+        "JPEG_B64_BUDGET", str(JPEG_B64_BUDGET), 1))
+)
 
 
 def snapshot(target: Target, topic: str, seconds: int = 8) -> tuple[dict, Result]:
@@ -859,6 +894,9 @@ def snapshot(target: Target, topic: str, seconds: int = 8) -> tuple[dict, Result
             meta["stamp"] = line[len("@@STAMP "):].strip()
         elif line.startswith("@@BYTES "):
             meta["bytes"] = int(line[len("@@BYTES "):].strip() or 0)
+        elif line.startswith("@@QUALITY "):
+            quality = line[len("@@QUALITY "):].strip()
+            meta["quality"] = int(quality) if quality.isdigit() else None
         elif line.startswith("@@SOURCE "):
             meta["source"] = line[len("@@SOURCE "):].strip()
     return {"topic": topic, "ok": True, "encoding": "base64", "data": payload,

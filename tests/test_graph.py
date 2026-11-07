@@ -491,3 +491,30 @@ def test_no_topic_can_carry_a_rate_without_a_measured_block():
             name = entry["name"]
             if "rate_hz" in entry:
                 assert "measured" in entry, f"{name} has a rate and no provenance"
+
+
+def test_a_snapshot_keeps_the_camera_resolution_by_default():
+    from ros2_console.graph import yuyv_to_rgb as f
+
+    w, h, step = 640, 480, 1280
+    yuyv = bytes([128]) * (h * step)
+    native = f(yuyv, h, w, step)
+    assert native.shape == (480, 640, 3), native.shape
+    halved = f(yuyv, h, w, step, max_width=480)
+    assert halved.shape == (240, 320, 3), halved.shape
+
+
+def test_the_snapshot_encoder_flexes_quality_not_resolution():
+    from PIL import Image
+    from ros2_console.graph import encode_jpeg
+
+    smooth = Image.new("RGB", (640, 480), (30, 60, 90))
+    data, quality = encode_jpeg(smooth)
+    assert quality == 92 and len(data) * 4 // 3 <= 170_000
+    assert Image.open(__import__("io").BytesIO(data)).size == (640, 480), "resolution must not give way"
+
+    noise = Image.frombytes("RGB", (640, 480),
+                            __import__("numpy").random.default_rng(3).integers(0, 255, 640 * 480 * 3, dtype="uint8").tobytes())
+    data, quality = encode_jpeg(noise)
+    assert quality == 64, "an incompressible frame falls to the last rung, it is not upscaled away"
+    assert Image.open(__import__("io").BytesIO(data)).size == (640, 480)
