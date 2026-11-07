@@ -6,7 +6,10 @@ const DEFAULT_TOPIC = '/camera/image_raw/compressed'
 
 // A read costs 11-12s on the board, so polling has to be slower than a read;
 // anything faster only queues work and repaints.
-const POLL_MS = 15000
+// A graph read costs 14-18s on the board with a colour publisher running, so a
+// 15s poll means the next read starts before the last one finished: the pane is
+// permanently mid-read and every timeout blanks it. Poll slower than a read.
+const POLL_MS = 30000
 
 // Animation cycles are quantised: a small rate change between polls would
 // otherwise produce a new dur value, restart the SMIL animation, and read as a
@@ -41,7 +44,7 @@ const SURFACE = {
 }
 
 const store = {
-  snap: { settings: null, graph: null, error: '', at: '' },
+  snap: { settings: null, graph: null, error: '', at: '', stale: false },
   listeners: new Set(),
   set(next) {
     this.snap = next
@@ -86,11 +89,15 @@ async function refresh(ctx) {
     const settings = await ctx.rest('/settings')
     const graph = await ctx.rest('/graph')
     const failed = graph && graph.ok === false
+    // A failed poll must not erase the last measured truth. What is on screen did
+    // happen; the honest change is to mark it stale and say when it was read,
+    // not to blank the pane and imply nothing is running.
     store.set({
       settings,
-      graph: failed ? null : graph,
+      graph: failed ? previous.graph : graph,
       error: failed ? graph.error || 'Graph request failed.' : '',
-      at: clock(),
+      stale: failed,
+      at: failed ? previous.at : clock(),
       loading: false,
     })
   } catch (err) {
@@ -98,7 +105,8 @@ async function refresh(ctx) {
       settings: previous.settings,
       graph: previous.graph,
       error: err && err.message ? err.message : String(err),
-      at: clock(),
+      stale: true,
+      at: previous.at,
       loading: false,
     })
   } finally {
@@ -1008,9 +1016,11 @@ function Pane({ ctx, bus }) {
             style: { color: 'var(--ui-text-tertiary)' },
             children: snap.loading
               ? 'reading graph…'
-              : snap.at
-                ? 'updated ' + snap.at
-                : 'not refreshed',
+              : snap.stale && snap.at
+                ? 'stale — last read ' + snap.at
+                : snap.at
+                  ? 'updated ' + snap.at
+                  : 'not refreshed',
           }),
         ],
       }),
