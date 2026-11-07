@@ -309,7 +309,7 @@ _TOOLS = [
                 "returning the path so it can be inspected or shown. A "
                 "sensor_msgs/CompressedImage payload is written through unchanged and a raw "
                 "sensor_msgs/Image is decoded on the robot from its encoding, step and colour "
-                "order (rgb8, bgr8, rgba8, bgra8, mono8), which needs numpy and Pillow there. "
+                "order (rgb8, bgr8, rgba8, bgra8, mono8, yuyv), which needs numpy and Pillow there. "
                 "The path always ends .jpg, so trust the returned `format` for the real "
                 "encoding. Any other type is refused by name. This is how a robot's camera "
                 "becomes something the agent can actually look at."

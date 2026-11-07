@@ -28,8 +28,10 @@ different handling:
 
 - **`CompressedImage`** — the payload is already JPEG or PNG and is written through unchanged.
 - **`Image`** (raw) — decoded **on the robot** with the message's own fields: `encoding`
-  (`rgb8`, `bgr8`, `rgba8`, `bgra8`, `mono8`), `step` as the row stride, and the matching colour
-  order, then encoded as JPEG q85. Nothing is guessed: an encoding outside that list, or a payload
+  (rgb8, bgr8, rgba8, bgra8, mono8, yuyv), `step` as the row stride, and the matching colour
+  order, then encoded as JPEG q85. `yuyv` (4:2:2) is decoded by dropping whole chroma pairs to at
+  most 480 px wide before the colour conversion, so the robot never converts a full-size frame for
+  a thumbnail. Nothing is guessed: an encoding outside that list, or a payload
   shorter than `height × step`, is refused with an error that names the problem.
 
 The raw path needs `numpy` and Pillow importable by the robot's `python3`, since the decode runs

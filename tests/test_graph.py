@@ -374,3 +374,64 @@ def test_raw_image_body_checks_the_decoder_before_subscribing():
 
     assert "cannot decode raw" in SNAPSHOT_BODY
     assert 'missing.append("numpy")' in SNAPSHOT_BODY
+
+
+def test_yuyv_decodes_to_rgb_and_the_script_carries_it():
+    import inspect
+
+    import numpy as np
+    import pytest
+
+    cv2 = pytest.importorskip("cv2")
+    from ros2_console.graph import SNAPSHOT_SCRIPT, yuyv_to_rgb as f
+
+    h, w = 6, 8
+    y = np.rint(np.tile(np.linspace(60, 220, w), (h, 1))).astype(np.uint8)
+    pairs = np.empty((h, w // 2, 4), dtype=np.uint8)
+    pairs[:, :, 0::2] = y.reshape(h, w // 2, 2)
+    pairs[:, :, 1] = 128
+    pairs[:, :, 3] = 128
+    pairs[:3, :2, 1] = 40
+    pairs[:3, :2, 3] = 220
+    raw = pairs.reshape(-1).tobytes()
+    ref = cv2.cvtColor(np.frombuffer(raw, np.uint8).reshape(h, w, 2), cv2.COLOR_YUV2RGB_YUY2)
+    out = f(raw, h, w, 2 * w)
+    assert out.shape == (h, w, 3)
+    assert out.dtype == np.uint8
+    assert np.abs(out.astype(int) - ref.astype(int)).max() <= 2
+
+    h, w, step = 480, 640, 1280
+    y = np.rint(np.tile(np.linspace(60, 220, w), (h, 1))).astype(np.uint8)
+    pair_index = np.arange(w // 2)
+    pairs = np.empty((h, w // 2, 4), dtype=np.uint8)
+    pairs[:, :, 0::2] = y.reshape(h, w // 2, 2)
+    pairs[:, :, 1] = np.where(pair_index % 2 == 0, 60, 200)
+    pairs[:, :, 3] = np.where(pair_index % 2 == 0, 220, 60)
+    raw = pairs.reshape(-1).tobytes()
+    out = f(raw, h, w, step, max_width=480)
+    assert out.shape == (240, 320, 3)
+    assert out.shape[1] <= 480
+    decimated = pairs[::2, ::2].reshape(out.shape[0], out.shape[1], 2)
+    ref = cv2.cvtColor(decimated, cv2.COLOR_YUV2RGB_YUY2)
+    assert np.abs(out.astype(int) - ref.astype(int)).max() <= 2
+    full = cv2.cvtColor(np.frombuffer(raw, np.uint8).reshape(h, w, 2), cv2.COLOR_YUV2RGB_YUY2)
+    # This arm fails if decimation moves to after the conversion.
+    assert np.abs(out.astype(int) - full[::2, ::2].astype(int)).max() > 2
+
+    assert inspect.getsource(f).strip() in SNAPSHOT_SCRIPT
+    assert "@@DECODER@@" not in SNAPSHOT_SCRIPT
+    assert ("unsupported encoding %s (rgb8, bgr8, rgba8, bgra8, mono8, yuyv)"
+            in SNAPSHOT_SCRIPT)
+
+
+def test_the_documented_encoding_list_names_yuyv():
+    from pathlib import Path
+
+    import ros2_console.tools
+    from ros2_console.graph import SNAPSHOT_SCRIPT
+
+    listed = ", ".join(("rgb8", "bgr8", "rgba8", "bgra8", "mono8", "yuyv"))
+    skill = Path(__file__).parents[1] / "skills/ros2-camera-and-images/SKILL.md"
+    assert listed in SNAPSHOT_SCRIPT
+    assert listed in Path(ros2_console.tools.__file__).read_text()
+    assert listed in skill.read_text()

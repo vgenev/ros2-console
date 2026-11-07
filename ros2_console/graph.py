@@ -2,11 +2,13 @@
 
 Everything here is stdlib — the plugin runs `ros2` on the target and reads its
 text output, so it works on any distro version from Foxy to Kilted without a
-Python dependency that has to match the robot's.
+Python dependency that has to match the robot's. Only the yuyv decoder imports
+numpy, at call time, inside the shipped script.
 """
 
 from __future__ import annotations
 
+import inspect
 import re
 import shlex
 
@@ -627,6 +629,39 @@ def rate(target: Target, topic: str, seconds: int = 6, window: int = 30) -> tupl
 
 # -------------------------------------------------------------------------- camera
 
+def yuyv_to_rgb(yuy2, height, width, step, max_width=480):
+    """YUYV/YUY2 (4:2:2) -> (h, w, 3) uint8 RGB, downscaling BEFORE the colour maths.
+
+    numpy only, on purpose: this source is also shipped to the robot (see SNAPSHOT_SCRIPT),
+    which has numpy and Pillow but not OpenCV. Decimation drops whole chroma pairs (the 4:2:2
+    sample unit), so a 640x480 frame thumbnail costs 320x240 of arithmetic, not 640x480.
+    """
+    import numpy as np
+
+    buf = yuy2 if isinstance(yuy2, np.ndarray) else np.frombuffer(yuy2, dtype=np.uint8)
+    buf = buf.reshape(-1)
+    if buf.size < height * step:
+        raise ValueError("truncated yuyv buffer: %d bytes for %dx%d step %d"
+                         % (buf.size, height, width, step))
+    pairs = buf[: height * step].reshape(height, step)[:, : (width // 2) * 4]
+    pairs = pairs.reshape(height, width // 2, 4)
+    col_step = row_step = 1
+    while width // col_step > max_width:
+        col_step *= 2
+        row_step *= 2
+    pairs = pairs[::row_step, ::col_step]
+    h, w2 = pairs.shape[0], pairs.shape[1]
+    w = w2 * 2
+    y = pairs[:, :, 0::2].reshape(h, w).astype(np.int32)
+    u = np.repeat(pairs[:, :, 1:2], 2, axis=2).reshape(h, w).astype(np.int32) - 128
+    v = np.repeat(pairs[:, :, 3:4], 2, axis=2).reshape(h, w).astype(np.int32) - 128
+    c = y - 16
+    r = (298 * c + 409 * v + 128) >> 8
+    g = (298 * c - 100 * u - 208 * v + 128) >> 8
+    b = (298 * c + 516 * u + 128) >> 8
+    return np.clip(np.stack([r, g, b], axis=-1), 0, 255).astype(np.uint8)
+
+
 SNAPSHOT_BODY = r'''
 import base64
 import io
@@ -683,6 +718,7 @@ if is_raw:
         sys.exit(3)
 
 
+@@DECODER@@
 def handle_compressed(msg):
     box["data"] = bytes(msg.data)
     box["format"] = msg.format
@@ -695,21 +731,25 @@ def handle_raw(msg):
 
     h, w, step = msg.height, msg.width, msg.step
     channels = {"rgb8": 3, "bgr8": 3, "rgba8": 4, "bgra8": 4, "mono8": 1}.get(msg.encoding)
-    if channels is None:
-        box["err"] = "unsupported encoding %s (rgb8, bgr8, rgba8, bgra8, mono8)" % msg.encoding
-        return
     buf = np.frombuffer(bytes(msg.data), dtype=np.uint8)
     if buf.size < h * step:
         box["err"] = "truncated payload: %d bytes for %dx%d step %d" % (buf.size, h, w, step)
         return
-    rows = buf[: h * step].reshape(h, step)[:, : w * channels]
-    arr = rows.reshape(h, w, channels)
-    if channels == 1:
-        img = Image.fromarray(arr[:, :, 0], mode="L")
+    if msg.encoding == "yuyv":
+        img = Image.fromarray(yuyv_to_rgb(bytes(msg.data), h, w, step), mode="RGB")
+    elif channels is None:
+        box["err"] = ("unsupported encoding %s (rgb8, bgr8, rgba8, bgra8, mono8, yuyv)"
+                      % msg.encoding)
+        return
     else:
-        if msg.encoding in ("bgr8", "bgra8"):
-            arr = arr[:, :, [2, 1, 0] + ([3] if channels == 4 else [])]
-        img = Image.fromarray(arr[:, :, :3], mode="RGB")
+        rows = buf[: h * step].reshape(h, step)[:, : w * channels]
+        arr = rows.reshape(h, w, channels)
+        if channels == 1:
+            img = Image.fromarray(arr[:, :, 0], mode="L")
+        else:
+            if msg.encoding in ("bgr8", "bgra8"):
+                arr = arr[:, :, [2, 1, 0] + ([3] if channels == 4 else [])]
+            img = Image.fromarray(arr[:, :, :3], mode="RGB")
     out = io.BytesIO()
     img.save(out, format="JPEG", quality=85)
     box["data"] = out.getvalue()
@@ -746,12 +786,14 @@ print("@@BYTES %d" % len(box["data"]))
 print("@@B64 " + base64.b64encode(box["data"]).decode("ascii"))
 '''
 
+SNAPSHOT_SCRIPT = SNAPSHOT_BODY.replace("@@DECODER@@", inspect.getsource(yuyv_to_rgb))
+
 
 def snapshot(target: Target, topic: str, seconds: int = 8) -> tuple[dict, Result]:
     """Grab one camera frame. Handles `CompressedImage` and raw `Image` (decoded on the robot)."""
     topic = validate_topic(topic)
     seconds = max(2, min(20, int(seconds)))
-    script = f"python3 - {shlex.quote(topic)} {seconds} <<'HERMES_SNAPSHOT'\n{SNAPSHOT_BODY}\nHERMES_SNAPSHOT"
+    script = f"python3 - {shlex.quote(topic)} {seconds} <<'HERMES_SNAPSHOT'\n{SNAPSHOT_SCRIPT}\nHERMES_SNAPSHOT"
     result = run(target, script, timeout=seconds + 12, label=f"snapshot {topic}")
     # A truncated capture has no usable tail: the base64 block is cut mid-stream,
     # so decoding it yields a corrupt image or a ValueError. Say "too large".
