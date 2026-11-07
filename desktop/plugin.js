@@ -525,6 +525,57 @@ function Topology({ graph, onHover, onLeave, onPin }) {
   })
 }
 
+// What the read actually found, kept on screen instead of hidden behind a hover:
+// counts, and the measurement itself — window and read clock. ROS 2 publishes no
+// telemetry, so these numbers exist only because this pane went and measured
+// them, and the strip says so.
+function MetricsStrip({ graph, at }) {
+  if (!graph) return null
+  const counts = graph.counts || {}
+  const measured = (graph.topics || []).filter((t) => t.measured && t.measured.at)
+  const stamp = at || (measured.length ? measured[0].measured.at : '')
+  const clock = stamp ? String(stamp).replace('T', ' ').replace('Z', ' UTC') : 'not measured'
+  const cells = [
+    [counts.nodes, 'nodes'],
+    [counts.topics, 'topics'],
+    [counts.orphans, 'orphans'],
+    [counts.latched, 'latched'],
+    [counts.rate_skipped, 'rate skipped'],
+  ]
+  return jsxs('div', {
+    style: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: '14px',
+      alignItems: 'baseline',
+      padding: '6px 8px',
+      marginBottom: '8px',
+      border: '1px solid var(--ui-border, rgba(255,255,255,0.12))',
+      borderRadius: '4px',
+      fontFamily: 'ui-monospace, monospace',
+      fontSize: '11px',
+    },
+    children: [
+      ...cells.map(([value, label]) =>
+        jsxs('span', {
+          children: [
+            jsx('strong', {
+              style: { fontSize: '13px', color: 'var(--ui-text-primary, inherit)' },
+              children: value == null ? '—' : String(value),
+            }),
+            ' ' + label,
+          ],
+        }, label)
+      ),
+      jsx('span', {
+        style: { marginLeft: 'auto', color: 'var(--ui-text-tertiary)' },
+        title: 'when this read was taken; every rate above covers the window named in the table',
+        children: 'read ' + clock,
+      }),
+    ],
+  })
+}
+
 function GraphTable({ graph, onHover, onLeave, onPin }) {
   const topics = (graph && graph.topics) || []
   if (!topics.length) return jsx('p', { children: 'No topics on this target.' })
@@ -533,7 +584,7 @@ function GraphTable({ graph, onHover, onLeave, onPin }) {
     children: [
       jsx('thead', {
         children: jsxs('tr', {
-          children: ['topic', 'type', 'pub', 'sub', 'msg/s', 'health'].map((label) =>
+          children: ['topic', 'type', 'pub', 'sub', 'msg/s', 'evidence', 'health'].map((label) =>
             jsx('th', {
               style: {
                 textAlign: 'left',
@@ -574,6 +625,22 @@ function GraphTable({ graph, onHover, onLeave, onPin }) {
                   topic.rate_hz == null
                     ? '—'
                     : Number(topic.rate_hz).toFixed(Number(topic.rate_hz) >= 10 ? 0 : 1),
+              }),
+              jsx('td', {
+                style: {
+                  padding: '2px 6px',
+                  fontFamily: 'ui-monospace, monospace',
+                  color: 'var(--ui-text-tertiary)',
+                },
+                title: (topic.measured && topic.measured.at)
+                  ? 'measured at ' + topic.measured.at
+                  : (topic.rate_reason || 'no measurement taken'),
+                children: topic.measured
+                  ? (topic.measured.msgs == null
+                      ? 'unstated'
+                      : String(topic.measured.msgs) + ' / ' +
+                        String(topic.measured.window_s) + 's')
+                  : '—',
               }),
               jsx('td', {
                 style: {
@@ -947,6 +1014,7 @@ function Pane({ ctx, bus }) {
           }),
         ],
       }),
+      jsx(MetricsStrip, { graph: snap.graph, at: snap.at }),
       jsxs('div', {
         style: { display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px' },
         children: [
