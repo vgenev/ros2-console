@@ -563,7 +563,10 @@ def _graph_script(target: Target) -> str:
 
 def graph(target: Target, *, include_system: bool = False) -> tuple[dict | None, Result]:
     """Read the graph, refusing to call an unanswered discovery an empty robot."""
-    result = run(target, _graph_script(target), timeout=max(target.timeout, 20), label="graph")
+    # Reads measured 11-18s on the board depending on whether the colour publisher
+    # is busy, so a stored per-command timeout of 15 s cuts a healthy read in half
+    # and reports it as a dead ROS environment. The read owns its own floor.
+    result = run(target, _graph_script(target), timeout=max(target.timeout, 45), label="graph")
     text = result.stdout or ""
     answered, reason = _discovery(text)
     if not answered or "@@END" not in text:
@@ -574,6 +577,13 @@ def graph(target: Target, *, include_system: bool = False) -> tuple[dict | None,
             # Not even the script's own preamble came back: ssh refused, the key
             # failed, or the run timed out. The transport error is the story.
             reason = result.error()
+        elif "@@END" not in text:
+            # The preamble arrived and the graph never did. That is a cut-short run,
+            # not an unsourced shell: only say "not sourced" when the script had
+            # every chance to speak and stayed silent.
+            reason = ("the read reached the distro line but the output ended before discovery "
+                      "(%d B, rc=%s) — the run was cut short, not an unsourced shell"
+                      % (len(text), result.exit_code))
         # `result.ok` can be true here: an unsourced shell exits cleanly. The
         # marker is the evidence, and there is none.
         result.meta["discovery_error"] = reason
@@ -870,7 +880,10 @@ def snapshot(target: Target, topic: str, seconds: int = 8) -> tuple[dict, Result
     topic = validate_topic(topic)
     seconds = max(2, min(20, int(seconds)))
     script = f"python3 - {shlex.quote(topic)} {seconds} <<'HERMES_SNAPSHOT'\n{SNAPSHOT_SCRIPT}\nHERMES_SNAPSHOT"
-    result = run(target, script, timeout=seconds + 12, label=f"snapshot {topic}")
+    # the script's own wait, plus room for ssh, the shell prelude and a frame decode on
+    # a board that is also publishing; measured grabs run 5-6s but the budget must
+    # survive a busy box rather than time out into "no frame"
+    result = run(target, script, timeout=seconds + 30, label=f"snapshot {topic}")
     # A truncated capture has no usable tail: the base64 block is cut mid-stream,
     # so decoding it yields a corrupt image or a ValueError. Say "too large".
     ensure_complete(result, f"camera snapshot of {topic}")

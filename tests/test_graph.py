@@ -518,3 +518,21 @@ def test_the_snapshot_encoder_flexes_quality_not_resolution():
     data, quality = encode_jpeg(noise)
     assert quality == 64, "an incompressible frame falls to the last rung, it is not upscaled away"
     assert Image.open(__import__("io").BytesIO(data)).size == (640, 480)
+
+
+def test_a_cut_short_read_is_not_reported_as_an_unsourced_shell():
+    """The pane once showed "not sourced" for a run that was simply killed mid-read."""
+    from ros2_console import graph as gm
+    from ros2_console.transport import Result
+
+    truncated = "@@DISTRO jazzy\n@@RMW default\n@@NODES\n/talker\n"
+    result = Result(ok=True, stdout=truncated, stderr="", exit_code=0, meta={})
+    original = gm.run
+    gm.run = lambda *a, **k: result
+    try:
+        payload, res = gm.graph(gm.Target(host="127.0.0.1", distro="jazzy", timeout=15))
+    finally:
+        gm.run = original
+    assert payload is None
+    msg = res.meta["discovery_error"]
+    assert "cut short" in msg and "not an unsourced shell" in msg, msg
