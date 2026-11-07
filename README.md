@@ -1,5 +1,7 @@
 # ROS 2 Console
 
+![A draughtsman's plate: a winged messenger holds the threads that suspend a small boxy robot, over faint construction circles.](docs/assets/hermes-plate.jpg)
+
 This plugin lets Hermes read a live ROS 2 system. It lists nodes and topics, measures publish rates, samples one message, and saves a compressed camera frame. Every command runs on the robot over SSH, through the robot's own `ros2` CLI. Nothing is installed on the robot, and the plugin holds no credentials.
 
 ## Install
