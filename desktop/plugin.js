@@ -415,7 +415,9 @@ function Topology({ graph, onHover, onLeave, onPin }) {
   const W = 1120
   const PUB_X = 210
   const SUB_R = W - 12
-  const MID = Math.round(W / 2)
+  // Topics sit left of centre: the subscriber lane is right-aligned against the
+  // edge and needs the room, while the publisher names are short.
+  const MID = Math.round(W * 0.42)
   const rows = Math.max(pubNodes.length, topicList.length, subNodes.length, 1)
   const height = rows * rowH + 40
 
