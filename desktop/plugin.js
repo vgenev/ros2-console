@@ -412,15 +412,21 @@ function Topology({ graph, onHover, onLeave, onPin }) {
   const topicList = [...new Set(shown.map((e) => e.topic))].sort()
 
   const rowH = 26
-  const W = 960
+  const W = 1120
   const PUB_X = 210
-  const SUB_X = W - 210
+  const SUB_R = W - 12
   const MID = Math.round(W / 2)
   const rows = Math.max(pubNodes.length, topicList.length, subNodes.length, 1)
   const height = rows * rowH + 40
 
   const pubY = new Map(pubNodes.map((n, i) => [n, 30 + i * rowH]))
   const subY = new Map(subNodes.map((n, i) => [n, 30 + i * rowH]))
+  const subName = (n) => (n.length > 26 ? n.slice(0, 25) + '…' : n)
+  // Right-aligned, so the dot has to be placed from the rendered name's width —
+  // a fixed dot column plus right-aligned text would float the dot mid-air.
+  const subDotX = new Map(
+    subNodes.map((n) => [n, Math.round(SUB_R - subName(n).length * 6.4 - 16)])
+  )
   const topicY = new Map(topicList.map((t, i) => [t, 30 + i * rowH]))
   // The topic's name is printed to the RIGHT of its dot, so a subscriber-side edge
   // that started at the dot would be drawn straight through the name. Anchor it
@@ -477,7 +483,7 @@ function Topology({ graph, onHover, onLeave, onPin }) {
     const y1 = topicY.get(e.topic)
     const y2 = subY.get(e.node)
     if (y1 == null || y2 == null) return
-    lines.push(seg(subAnchorX, SUB_X - 14, y1, y2, e.topic, e, 's' + i))
+    lines.push(seg(subAnchorX, subDotX.get(e.node) || SUB_R - 60, y1, y2, e.topic, e, 's' + i))
   })
 
   const activeBits = []
@@ -526,7 +532,7 @@ function Topology({ graph, onHover, onLeave, onPin }) {
                 children: [
                   colLabel(PUB_X, 'end', 'publishers'),
                   colLabel(MID, 'middle', 'topics'),
-                  colLabel(SUB_X - 6, 'start', 'subscribers'),
+                  colLabel(SUB_R, 'end', 'subscribers'),
                   ...lines,
                   ...pubNodes.map((n) => {
                     const on = focus === n
@@ -562,21 +568,22 @@ function Topology({ graph, onHover, onLeave, onPin }) {
                       style: { cursor: 'pointer' },
                       children: [
                         jsx('circle', {
-                          cx: String(SUB_X - 14),
+                          cx: String(subDotX.get(n) || SUB_R - 60),
                           cy: String(subY.get(n)),
                           r: '3.5',
                           fill: on ? SURFACE.text : SURFACE.muted,
                         }, 'snd' + n),
                         jsx('text', {
-                      x: String(SUB_X - 6),
+                      x: String(SUB_R),
                       y: String(subY.get(n) + 4),
+                      'text-anchor': 'end',
                       'font-size': '11',
                       fill: on ? SURFACE.text : SURFACE.body,
                       'font-weight': on ? '600' : '400',
                       opacity: isDim(n) ? 0.35 : 1,
                       onClick: () => setFocus(on ? null : n),
                       style: { cursor: 'pointer' },
-                      children: (on ? '▸ ' : '') + (n.length > 26 ? n.slice(0, 25) + '…' : n),
+                      children: (on ? '▸ ' : '') + subName(n),
                     }, 'snt' + n),
                       ],
                     }, 'sn' + n)
