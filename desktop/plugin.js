@@ -485,7 +485,6 @@ function Topology({ graph, onHover, onLeave, onPin }) {
       ],
     }, key)
   }
-  }
 
   const lines = []
   pubEdges.forEach((e, i) => {
