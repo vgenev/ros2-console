@@ -398,46 +398,50 @@ function Topology({ graph, onHover, onLeave, onPin }) {
     healthOf: (t) => health.get(t) || 'unmeasured',
   })
   const shown = sel.shown
-  const matched = sel.matchedNodes
   const isDim = sel.dim
   const focusTopics = focus
     ? new Set(edges.filter((e) => e.node === focus).map((e) => e.topic))
     : null
 
-  const nodeList = [...sel.nodes]
-  if (focus && !nodeList.includes(focus)) nodeList.push(focus)
-  const topicList = [...sel.topics]
+  // A node is not one thing: it can publish one topic and subscribe to another,
+  // so it appears in both columns rather than being forced into a single side.
+  const pubEdges = shown.filter((e) => e.role !== 'subscriber')
+  const subEdges = shown.filter((e) => e.role === 'subscriber')
+  const pubNodes = [...new Set(pubEdges.map((e) => e.node))].sort()
+  const subNodes = [...new Set(subEdges.map((e) => e.node))].sort()
+  const topicList = [...new Set(shown.map((e) => e.topic))].sort()
 
   const rowH = 26
-  const W = 820
-  const LANE_L = 210
-  const LANE_R = W - 210
-  const height = Math.max(nodeList.length, topicList.length) * rowH + 24
-  const nodeY = new Map(nodeList.map((n, i) => [n, 18 + i * rowH]))
-  const topicY = new Map(topicList.map((t, i) => [t, 18 + i * rowH]))
+  const W = 960
+  const PUB_X = 210
+  const SUB_X = W - 210
+  const MID = Math.round(W / 2)
+  const rows = Math.max(pubNodes.length, topicList.length, subNodes.length, 1)
+  const height = rows * rowH + 40
 
-  const lines = shown.map((e, i) => {
-    const y1 = nodeY.get(e.node)
-    const y2 = topicY.get(e.topic)
-    if (y1 == null || y2 == null) return null
-    const healthOf = health.get(e.topic)
+  const pubY = new Map(pubNodes.map((n, i) => [n, 30 + i * rowH]))
+  const subY = new Map(subNodes.map((n, i) => [n, 30 + i * rowH]))
+  const topicY = new Map(topicList.map((t, i) => [t, 30 + i * rowH]))
+
+  const seg = (fromX, toX, y1, y2, topic, e, key) => {
+    const healthOf = health.get(topic)
     const color = HEALTH_COLOR[healthOf] || '#9aa3b5'
-    const rate = rates.get(e.topic) || 0
+    const rate = rates.get(topic) || 0
     // Motion is measured traffic, not wiring: the dash cycle shortens as the
-    // topic's real message rate rises, and a quiet topic (0 msg/s in the sample
-    // window) does not move at all even when both endpoints exist.
+    // topic's real message rate rises, and a quiet topic does not move at all.
     const moves = rate > 0 && (healthOf === 'live' || healthOf === 'silent' || healthOf === 'state')
     const dur = moves ? ANIM_BUCKETS[animBucket(rate)] : null
+    const bend = (toX - fromX) * 0.45
     const d =
-      'M ' + LANE_L + ' ' + y1 + ' C ' + (LANE_L + 110) + ' ' + y1 + ', ' +
-      (LANE_R - 110) + ' ' + y2 + ', ' + LANE_R + ' ' + y2
-    return jsxs('path', {
+      'M ' + fromX + ' ' + y1 + ' C ' + (fromX + (fromX < toX ? bend : -bend)) + ' ' + y1 + ', ' +
+      (toX + (fromX < toX ? -bend : bend)) + ' ' + y2 + ', ' + toX + ' ' + y2
+    return jsx('path', {
       d,
       fill: 'none',
       stroke: color,
       'stroke-width': moves ? 1.8 : 1.2,
-      'stroke-dasharray': moves ? '7 7' : e.role === 'publisher' ? '0' : '4 3',
-      opacity: (moves ? 0.75 : 0.42) * (isDim(e.node) ? 0.3 : 1),
+      'stroke-dasharray': moves ? '7 7' : '0',
+      opacity: (moves ? 0.7 : 0.34) * (isDim(e.node) ? 0.3 : 1),
       children: moves
         ? jsx('animate', {
             attributeName: 'stroke-dashoffset',
@@ -447,7 +451,21 @@ function Topology({ graph, onHover, onLeave, onPin }) {
             repeatCount: 'indefinite',
           })
         : null,
-    }, 'e' + i)
+    }, key)
+  }
+
+  const lines = []
+  pubEdges.forEach((e, i) => {
+    const y1 = pubY.get(e.node)
+    const y2 = topicY.get(e.topic)
+    if (y1 == null || y2 == null) return
+    lines.push(seg(PUB_X + 6, MID - 8, y1, y2, e.topic, e, 'p' + i))
+  })
+  subEdges.forEach((e, i) => {
+    const y1 = topicY.get(e.topic)
+    const y2 = subY.get(e.node)
+    if (y1 == null || y2 == null) return
+    lines.push(seg(MID + 8, SUB_X - 6, y1, y2, e.topic, e, 's' + i))
   })
 
   const activeBits = []
@@ -456,12 +474,23 @@ function Topology({ graph, onHover, onLeave, onPin }) {
   if (terms.length) activeBits.push('matching "' + query.trim() + '"')
   const activeLabel = activeBits.join(' · ')
 
+  const colLabel = (x, anchor, text) =>
+    jsx('text', {
+      x: String(x),
+      y: '13',
+      'text-anchor': anchor,
+      'font-size': '9',
+      'letter-spacing': '0.08em',
+      fill: SURFACE.muted,
+      children: text.toUpperCase(),
+    }, 'h' + text)
+
   return jsxs('div', {
     children: [
       jsx(FilterBar, {
         query: query,
         onQuery: setQuery,
-        showing: nodeList.length,
+        showing: new Set([...pubNodes, ...subNodes]).size,
         total: allNodes.length,
         activeLabel: activeLabel,
         onClear: () => {
@@ -483,14 +512,15 @@ function Topology({ graph, onHover, onLeave, onPin }) {
                 height: String(Math.max(height, 60)),
                 style: { display: 'block' },
                 children: [
+                  colLabel(PUB_X, 'end', 'publishers'),
+                  colLabel(MID, 'middle', 'topics'),
+                  colLabel(SUB_X - 6, 'start', 'subscribers'),
                   ...lines,
-                  ...nodeList.map((n) => {
+                  ...pubNodes.map((n) => {
                     const on = focus === n
-                    const peerOfFocus = focusTopics && !on && focusTopics.size > 0 &&
-                      edges.some((e) => e.node === n && focusTopics.has(e.topic))
                     return jsx('text', {
-                      x: String(LANE_L - 8),
-                      y: String(nodeY.get(n) + 4),
+                      x: String(PUB_X),
+                      y: String(pubY.get(n) + 4),
                       'text-anchor': 'end',
                       'font-size': '11',
                       fill: on ? SURFACE.text : SURFACE.body,
@@ -498,11 +528,27 @@ function Topology({ graph, onHover, onLeave, onPin }) {
                       opacity: isDim(n) ? 0.35 : 1,
                       onClick: () => setFocus(on ? null : n),
                       style: { cursor: 'pointer' },
-                      children: (on ? '▸ ' : '') + (n.length > 30 ? n.slice(0, 29) + '…' : n),
-                    }, 'n' + n)
+                      children: (on ? '▸ ' : '') + (n.length > 26 ? n.slice(0, 25) + '…' : n),
+                    }, 'pn' + n)
+                  }),
+                  ...subNodes.map((n) => {
+                    const on = focus === n
+                    return jsx('text', {
+                      x: String(SUB_X - 6),
+                      y: String(subY.get(n) + 4),
+                      'font-size': '11',
+                      fill: on ? SURFACE.text : SURFACE.body,
+                      'font-weight': on ? '600' : '400',
+                      opacity: isDim(n) ? 0.35 : 1,
+                      onClick: () => setFocus(on ? null : n),
+                      style: { cursor: 'pointer' },
+                      children: (on ? '▸ ' : '') + (n.length > 26 ? n.slice(0, 25) + '…' : n),
+                    }, 'sn' + n)
                   }),
                   ...topicList.map((t) => {
                     const h = health.get(t)
+                    const r = rates.get(t) || 0
+                    const label = t.length > 34 ? t.slice(0, 33) + '…' : t
                     return jsxs('g', {
                       onMouseEnter: (ev) => onHover && onHover(t, ev),
                       onMouseLeave: () => onLeave && onLeave(),
@@ -510,17 +556,17 @@ function Topology({ graph, onHover, onLeave, onPin }) {
                       style: { cursor: 'pointer' },
                       children: [
                         jsx('circle', {
-                          cx: String(LANE_R + 6),
+                          cx: String(MID - 10),
                           cy: String(topicY.get(t)),
                           r: '3.5',
                           fill: HEALTH_COLOR[h] || '#9aa3b5',
                         }, 'd' + t),
                         jsx('text', {
-                          x: String(LANE_R + 15),
+                          x: String(MID - 2),
                           y: String(topicY.get(t) + 4),
                           'font-size': '11',
                           fill: SURFACE.body,
-                          children: t + ' · ' + (rates.get(t) ? rates.get(t).toFixed(1) + '/s' : 'no traffic'),
+                          children: label + '  ' + (r ? r.toFixed(1) + '/s' : 'no traffic'),
                         }, 't' + t),
                       ],
                     }, 'g' + t)
