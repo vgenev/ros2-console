@@ -443,6 +443,8 @@ function Topology({ graph, onHover, onLeave, onPin }) {
   const widest = topicList.reduce((m, t) => Math.max(m, labelFor(t).length), 0)
   const subAnchorX = Math.round(MID - 2 + widest * 6.4 + 16)
 
+  // A curve shows a connection; an arrow shows which way it flows. Both hops run
+  // left to right, so the head is a plain triangle at the end point.
   const seg = (fromX, toX, y1, y2, topic, e, key) => {
     const healthOf = health.get(topic)
     const color = HEALTH_COLOR[healthOf] || '#9aa3b5'
@@ -451,27 +453,38 @@ function Topology({ graph, onHover, onLeave, onPin }) {
     // topic's real message rate rises, and a quiet topic does not move at all.
     const moves = rate > 0 && (healthOf === 'live' || healthOf === 'silent' || healthOf === 'state')
     const dur = moves ? ANIM_BUCKETS[animBucket(rate)] : null
+    const dim = isDim(e.node) ? 0.3 : 1
     const bend = (toX - fromX) * 0.45
     const d =
       'M ' + fromX + ' ' + y1 + ' C ' + (fromX + (fromX < toX ? bend : -bend)) + ' ' + y1 + ', ' +
       (toX + (fromX < toX ? -bend : bend)) + ' ' + y2 + ', ' + toX + ' ' + y2
-    return jsx('path', {
-      d,
-      fill: 'none',
-      stroke: color,
-      'stroke-width': moves ? 1.8 : 1.2,
-      'stroke-dasharray': moves ? '7 7' : '0',
-      opacity: (moves ? 0.7 : 0.34) * (isDim(e.node) ? 0.3 : 1),
-      children: moves
-        ? jsx('animate', {
-            attributeName: 'stroke-dashoffset',
-            from: '0',
-            to: '-28',
-            dur: dur,
-            repeatCount: 'indefinite',
-          })
-        : null,
+    return jsxs('g', {
+      children: [
+        jsx('path', {
+          d,
+          fill: 'none',
+          stroke: color,
+          'stroke-width': moves ? 1.8 : 1.2,
+          'stroke-dasharray': moves ? '7 7' : '0',
+          opacity: (moves ? 0.7 : 0.34) * dim,
+          children: moves
+            ? jsx('animate', {
+                attributeName: 'stroke-dashoffset',
+                from: '0',
+                to: '-28',
+                dur: dur,
+                repeatCount: 'indefinite',
+              })
+            : null,
+        }, key + 'p'),
+        jsx('polygon', {
+          points: (toX - 8) + ',' + (y2 - 3.6) + ' ' + (toX - 8) + ',' + (y2 + 3.6) + ' ' + toX + ',' + y2,
+          fill: color,
+          opacity: (moves ? 0.9 : 0.5) * dim,
+        }, key + 'a'),
+      ],
     }, key)
+  }
   }
 
   const lines = []
