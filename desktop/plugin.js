@@ -422,6 +422,18 @@ function Topology({ graph, onHover, onLeave, onPin }) {
   const pubY = new Map(pubNodes.map((n, i) => [n, 30 + i * rowH]))
   const subY = new Map(subNodes.map((n, i) => [n, 30 + i * rowH]))
   const topicY = new Map(topicList.map((t, i) => [t, 30 + i * rowH]))
+  // The topic's name is printed to the RIGHT of its dot, so a subscriber-side edge
+  // that started at the dot would be drawn straight through the name. Anchor it
+  // just past the end of the text instead.
+  const labelFor = (t) => {
+    const base = t.length > 34 ? t.slice(0, 33) + '…' : t
+    const r = rates.get(t) || 0
+    return base + '  ' + (r ? r.toFixed(1) + '/s' : 'no traffic')
+  }
+  // Anchor every subscriber-side edge past the WIDEST label on screen: a per-topic
+  // estimate is one wide glyph away from crossing the text it was meant to clear.
+  const widest = topicList.reduce((m, t) => Math.max(m, labelFor(t).length), 0)
+  const subAnchorX = Math.round(MID - 2 + widest * 6.4 + 16)
 
   const seg = (fromX, toX, y1, y2, topic, e, key) => {
     const healthOf = health.get(topic)
@@ -459,13 +471,13 @@ function Topology({ graph, onHover, onLeave, onPin }) {
     const y1 = pubY.get(e.node)
     const y2 = topicY.get(e.topic)
     if (y1 == null || y2 == null) return
-    lines.push(seg(PUB_X + 6, MID - 8, y1, y2, e.topic, e, 'p' + i))
+    lines.push(seg(PUB_X + 10, MID - 10, y1, y2, e.topic, e, 'p' + i))
   })
   subEdges.forEach((e, i) => {
     const y1 = topicY.get(e.topic)
     const y2 = subY.get(e.node)
     if (y1 == null || y2 == null) return
-    lines.push(seg(MID + 8, SUB_X - 6, y1, y2, e.topic, e, 's' + i))
+    lines.push(seg(subAnchorX, SUB_X - 14, y1, y2, e.topic, e, 's' + i))
   })
 
   const activeBits = []
@@ -518,7 +530,17 @@ function Topology({ graph, onHover, onLeave, onPin }) {
                   ...lines,
                   ...pubNodes.map((n) => {
                     const on = focus === n
-                    return jsx('text', {
+                    return jsxs('g', {
+                      onClick: () => setFocus(on ? null : n),
+                      style: { cursor: 'pointer' },
+                      children: [
+                        jsx('circle', {
+                          cx: String(PUB_X + 10),
+                          cy: String(pubY.get(n)),
+                          r: '3.5',
+                          fill: on ? SURFACE.text : SURFACE.muted,
+                        }, 'pnd' + n),
+                        jsx('text', {
                       x: String(PUB_X),
                       y: String(pubY.get(n) + 4),
                       'text-anchor': 'end',
@@ -529,11 +551,23 @@ function Topology({ graph, onHover, onLeave, onPin }) {
                       onClick: () => setFocus(on ? null : n),
                       style: { cursor: 'pointer' },
                       children: (on ? '▸ ' : '') + (n.length > 26 ? n.slice(0, 25) + '…' : n),
+                    }, 'pnt' + n),
+                      ],
                     }, 'pn' + n)
                   }),
                   ...subNodes.map((n) => {
                     const on = focus === n
-                    return jsx('text', {
+                    return jsxs('g', {
+                      onClick: () => setFocus(on ? null : n),
+                      style: { cursor: 'pointer' },
+                      children: [
+                        jsx('circle', {
+                          cx: String(SUB_X - 14),
+                          cy: String(subY.get(n)),
+                          r: '3.5',
+                          fill: on ? SURFACE.text : SURFACE.muted,
+                        }, 'snd' + n),
+                        jsx('text', {
                       x: String(SUB_X - 6),
                       y: String(subY.get(n) + 4),
                       'font-size': '11',
@@ -543,12 +577,14 @@ function Topology({ graph, onHover, onLeave, onPin }) {
                       onClick: () => setFocus(on ? null : n),
                       style: { cursor: 'pointer' },
                       children: (on ? '▸ ' : '') + (n.length > 26 ? n.slice(0, 25) + '…' : n),
+                    }, 'snt' + n),
+                      ],
                     }, 'sn' + n)
                   }),
                   ...topicList.map((t) => {
                     const h = health.get(t)
                     const r = rates.get(t) || 0
-                    const label = t.length > 34 ? t.slice(0, 33) + '…' : t
+                    const label = labelFor(t)
                     return jsxs('g', {
                       onMouseEnter: (ev) => onHover && onHover(t, ev),
                       onMouseLeave: () => onLeave && onLeave(),
@@ -566,7 +602,7 @@ function Topology({ graph, onHover, onLeave, onPin }) {
                           y: String(topicY.get(t) + 4),
                           'font-size': '11',
                           fill: SURFACE.body,
-                          children: label + '  ' + (r ? r.toFixed(1) + '/s' : 'no traffic'),
+                          children: label,
                         }, 't' + t),
                       ],
                     }, 'g' + t)
