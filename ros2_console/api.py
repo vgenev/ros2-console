@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException
 
 from . import graph as obs
 from .settings import PLUGIN_ID, allowlist, resolve, stored
-from .tools import _graph
+from .tools import _graph, _publish
 from .transport import Target, validate_destination, validate_distro
 
 router = APIRouter()
@@ -153,3 +153,13 @@ def get_camera(topic: str = "", host: str = "", distro: str = "") -> dict:
         "bytes": data.get("bytes") or 0,
         "data_url": "data:image/jpeg;base64," + payload,
     }
+
+
+@router.post("/publish")
+def post_publish(body: dict) -> dict:
+    """The pane's write path. All six guards live in tools.publish_refusal, so a
+    call from here is no more privileged than a call from the agent."""
+    try:
+        return json.loads(_publish(body or {}))
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}

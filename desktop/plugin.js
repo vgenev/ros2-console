@@ -932,12 +932,23 @@ function Pane({ ctx, bus }) {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [view, setView] = useState('topology')
+  const [allowDraft, setAllowDraft] = useState('')
+  const [pubTopic, setPubTopic] = useState('')
+  const [pubPayload, setPubPayload] = useState('')
+  const [pubResult, setPubResult] = useState(null)
+  const [pubBusy, setPubBusy] = useState(false)
   const [tip, setTip] = useState(null)
 
   // The pane is useless without a target, and an installed user should not have to
   // hand-edit config.yaml to name their robot. Seed once from the saved settings.
   useEffect(() => {
     if (snap.settings && !hostDraft) setHostDraft(snap.settings.host || '')
+  }, [snap.settings])
+
+  // The write allowlist is the one setting a human must type: it is empty by
+  // default, and it is what makes a publish possible at all.
+  useEffect(() => {
+    if (snap.settings && !allowDraft) setAllowDraft((snap.settings.publish_allow || []).join(', '))
   }, [snap.settings])
 
   // Same reasoning for the camera: a hardcoded topic only matches the demo cell.
@@ -961,6 +972,8 @@ function Pane({ ctx, bus }) {
     return () => stop()
   }, [polling, topic])
 
+  const allowList = (snap.settings && snap.settings.publish_allow) || []
+
   async function save() {
     const base = snap.settings || {}
     setSaving(true)
@@ -973,6 +986,7 @@ function Pane({ ctx, bus }) {
           distro: base.distro || 'jazzy',
           setup: base.setup || '',
           timeout: base.timeout || 15,
+          publish_allow: allowDraft.split(',').map((v) => v.trim()).filter(Boolean),
         },
       })
       await bus.refresh()
@@ -1228,6 +1242,65 @@ function Pane({ ctx, bus }) {
           : frameError
             ? null
             : jsx('p', { children: 'No frame yet.' }),
+      ] }),
+      jsxs('div', { style: { marginTop: '12px' }, children: [
+        jsx('div', { style: { fontWeight: 600, marginBottom: '6px' }, children: 'Publish (write path)' }),
+        jsxs('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px' }, children: [
+          jsx('span', { style: { minWidth: '58px', color: 'var(--ui-text-tertiary)' }, children: 'allow' }),
+          jsx('input', {
+            type: 'text',
+            value: allowDraft,
+            placeholder: 'empty = publishing disabled, e.g. /demo/*',
+            onChange: (event) => setAllowDraft(event.target.value),
+            onKeyDown: (event) => { if (event.key === 'Enter') save() },
+            spellCheck: false,
+            style: { flex: 1, minWidth: 0, padding: '2px 6px', font: 'inherit', color: 'inherit', background: 'transparent', border: '1px solid var(--ui-border)', borderRadius: '4px' },
+          }),
+          jsx('button', { type: 'button', onClick: save, disabled: saving, children: saving ? 'Saving…' : 'Save' }),
+        ] }),
+        allowList.length === 0
+          ? jsx('p', { style: { color: 'var(--ui-text-tertiary)' }, children: 'Publishing is disabled: no topic glob is allowed, so every publish refuses.' })
+          : jsxs('div', { children: [
+              jsx('input', {
+                value: pubTopic,
+                placeholder: 'topic, e.g. /demo/led/frame',
+                onChange: (event) => setPubTopic(event.target.value),
+                spellCheck: false,
+                style: { width: '100%', boxSizing: 'border-box', marginBottom: '6px' },
+              }),
+              jsx('input', {
+                value: pubPayload,
+                placeholder: 'payload (the message\'s data field)',
+                onChange: (event) => setPubPayload(event.target.value),
+                spellCheck: false,
+                style: { width: '100%', boxSizing: 'border-box', marginBottom: '6px' },
+              }),
+              jsx('button', {
+                type: 'button',
+                disabled: pubBusy || !pubTopic || !pubPayload,
+                onClick: async () => {
+                  setPubBusy(true)
+                  setPubResult(null)
+                  try {
+                    const body = await ctx.rest('/publish', { method: 'POST', body: { topic: pubTopic.trim(), payload: pubPayload } })
+                    setPubResult(body)
+                  } catch (err) {
+                    setPubResult({ ok: false, error: err && err.message ? err.message : String(err) })
+                  } finally {
+                    setPubBusy(false)
+                  }
+                },
+                children: pubBusy ? 'Publishing…' : 'Publish and prove delivery',
+              }),
+              pubResult
+                ? jsx('p', {
+                    style: { marginTop: '6px', fontFamily: 'ui-monospace, monospace', color: pubResult.ok ? '#6ee7b7' : '#f0a5a5' },
+                    children: pubResult.ok
+                      ? 'received · ' + String(pubResult.sent || 1) + ' sent · ' + String(pubResult.type || '') + ' · echo ' + String(pubResult.echoed || '')
+                      : 'refused/failed · ' + String(pubResult.error || 'no reason reported'),
+                  })
+                : null,
+            ] }),
       ] }),
       tip ? jsx(TopicTip, { tip: tip, onClose: () => setTip(null) }) : null,
     ],

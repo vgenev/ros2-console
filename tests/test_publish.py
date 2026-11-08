@@ -30,8 +30,8 @@ def test_an_empty_allowlist_refuses_and_names_the_setting():
 
 
 def test_a_topic_outside_the_allowlist_is_refused_by_name():
-    why = refusal(["/demo/*"], topic="/objectzero/led/frame")
-    assert why and "/objectzero/led/frame" in why and "/demo/*" in why
+    why = refusal(["/demo/*"], topic="/robot/status")
+    assert why and "/robot/status" in why and "/demo/*" in why
 
 
 def test_an_allowlisted_topic_is_allowed():
