@@ -399,9 +399,6 @@ function Topology({ graph, onHover, onLeave, onPin }) {
   })
   const shown = sel.shown
   const isDim = sel.dim
-  const focusTopics = focus
-    ? new Set(edges.filter((e) => e.node === focus).map((e) => e.topic))
-    : null
 
   // A node is not one thing: it can publish one topic and subscribe to another,
   // so it appears in both columns rather than being forced into a single side.
@@ -411,43 +408,44 @@ function Topology({ graph, onHover, onLeave, onPin }) {
   const subNodes = [...new Set(subEdges.map((e) => e.node))].sort()
   const topicList = [...new Set(shown.map((e) => e.topic))].sort()
 
-  const rowH = 26
-  const W = 1120
-  const PUB_X = 210
-  const SUB_R = W - 12
-  // Topics sit left of centre: the subscriber lane is right-aligned against the
-  // edge and needs the room, while the publisher names are short.
-  const MID = Math.round(W * 0.42)
-  const rows = Math.max(pubNodes.length, topicList.length, subNodes.length, 1)
-  const height = rows * rowH + 40
-
-  const pubY = new Map(pubNodes.map((n, i) => [n, 30 + i * rowH]))
-  const subY = new Map(subNodes.map((n, i) => [n, 30 + i * rowH]))
-  const subName = (n) => (n.length > 26 ? n.slice(0, 25) + '…' : n)
-  // Right-aligned, so the dot has to be placed from the rendered name's width —
-  // a fixed dot column plus right-aligned text would float the dot mid-air.
-  const subDotX = new Map(
-    subNodes.map((n) => [n, Math.round(SUB_R - subName(n).length * 6.4 - 16)])
-  )
-  const topicY = new Map(topicList.map((t, i) => [t, 30 + i * rowH]))
-  // The topic's name is printed to the RIGHT of its dot, so a subscriber-side edge
-  // that started at the dot would be drawn straight through the name. Anchor it
-  // just past the end of the text instead.
   const labelFor = (t) => {
     const base = t.length > 34 ? t.slice(0, 33) + '…' : t
     const r = rates.get(t) || 0
     return base + '  ' + (r ? r.toFixed(1) + '/s' : 'no traffic')
   }
-  // Each subscriber-side edge starts just past ITS OWN label. Anchoring them all
-  // past the widest label on screen leaves a dead band beside every short name.
-  // 6.9 px/char is deliberately generous: landing short means a line through the
-  // text, landing long costs a few pixels of gap.
-  const subAnchor = new Map(
-    topicList.map((t) => [t, Math.round(MID - 2 + labelFor(t).length * 6.9 + 12)])
-  )
+  const truncated = (n) => (n.length > 26 ? n.slice(0, 25) + '…' : n)
 
-  // A curve shows a connection; an arrow shows which way it flows. Both hops run
-  // left to right, so the head is a plain triangle at the end point.
+  // Three fixed columns with one gap width, so the eye reads them as lanes:
+  //   publishers — right-aligned, ending at their dot
+  //   topics     — centred on the canvas, dot at a fixed left rail
+  //   subscribers— left-aligned, starting at their dot
+  // The glyph estimate is generous on purpose: landing short draws a line through
+  // text, landing long costs a few pixels of air.
+  const rowH = 26
+  const W = 1120
+  const MID = Math.round(W / 2)
+  const GAP = 56
+  const CH = 6.9
+  const maxHalf = Math.ceil(
+    topicList.reduce((m, t) => Math.max(m, labelFor(t).length), 0) * CH / 2
+  )
+  // A topic is a port pair: one dot where publishers feed in, one where
+  // subscribers are fed out. Symmetric dots read as in/out instead of leaving a
+  // lone marker stranded beside a short name.
+  const TOPIC_IN = MID - maxHalf - 12
+  const TOPIC_OUT = MID + maxHalf + 12
+  const PUB_DOT = TOPIC_IN - GAP
+  const PUB_TEXT = PUB_DOT - 10
+  const SUB_DOT = TOPIC_OUT + GAP
+  const SUB_TEXT = SUB_DOT + 12
+
+  const rows = Math.max(pubNodes.length, topicList.length, subNodes.length, 1)
+  const height = rows * rowH + 40
+  const pubY = new Map(pubNodes.map((n, i) => [n, 30 + i * rowH]))
+  const subY = new Map(subNodes.map((n, i) => [n, 30 + i * rowH]))
+  const topicY = new Map(topicList.map((t, i) => [t, 30 + i * rowH]))
+
+  // A curve shows a connection; an arrow shows which way it flows.
   const seg = (fromX, toX, y1, y2, topic, e, key) => {
     const healthOf = health.get(topic)
     const color = HEALTH_COLOR[healthOf] || '#9aa3b5'
@@ -457,10 +455,10 @@ function Topology({ graph, onHover, onLeave, onPin }) {
     const moves = rate > 0 && (healthOf === 'live' || healthOf === 'silent' || healthOf === 'state')
     const dur = moves ? ANIM_BUCKETS[animBucket(rate)] : null
     const dim = isDim(e.node) ? 0.3 : 1
-    const bend = (toX - fromX) * 0.45
+    const bend = Math.max(24, Math.abs(toX - fromX) * 0.4)
     const d =
-      'M ' + fromX + ' ' + y1 + ' C ' + (fromX + (fromX < toX ? bend : -bend)) + ' ' + y1 + ', ' +
-      (toX + (fromX < toX ? -bend : bend)) + ' ' + y2 + ', ' + toX + ' ' + y2
+      'M ' + fromX + ' ' + y1 + ' C ' + (fromX + bend) + ' ' + y1 + ', ' +
+      (toX - bend) + ' ' + y2 + ', ' + toX + ' ' + y2
     return jsxs('g', {
       children: [
         jsx('path', {
@@ -494,13 +492,13 @@ function Topology({ graph, onHover, onLeave, onPin }) {
     const y1 = pubY.get(e.node)
     const y2 = topicY.get(e.topic)
     if (y1 == null || y2 == null) return
-    lines.push(seg(PUB_X + 10, MID - 10, y1, y2, e.topic, e, 'p' + i))
+    lines.push(seg(PUB_DOT, TOPIC_IN, y1, y2, e.topic, e, 'p' + i))
   })
   subEdges.forEach((e, i) => {
     const y1 = topicY.get(e.topic)
     const y2 = subY.get(e.node)
     if (y1 == null || y2 == null) return
-    lines.push(seg(subAnchor.get(e.topic) || MID + 40, subDotX.get(e.node) || SUB_R - 60, y1, y2, e.topic, e, 's' + i))
+    lines.push(seg(TOPIC_OUT, SUB_DOT, y1, y2, e.topic, e, 's' + i))
   })
 
   const activeBits = []
@@ -519,6 +517,33 @@ function Topology({ graph, onHover, onLeave, onPin }) {
       fill: SURFACE.muted,
       children: text.toUpperCase(),
     }, 'h' + text)
+
+  const nodeRow = (n, x, y, anchor, prefix) => {
+    const on = focus === n
+    const dotX = anchor === 'end' ? x + 10 : x - 10
+    return jsxs('g', {
+      onClick: () => setFocus(on ? null : n),
+      style: { cursor: 'pointer' },
+      children: [
+        jsx('circle', {
+          cx: String(dotX),
+          cy: String(y),
+          r: '3.5',
+          fill: on ? SURFACE.text : SURFACE.muted,
+        }, prefix + 'd' + n),
+        jsx('text', {
+          x: String(x),
+          y: String(y + 4),
+          'text-anchor': anchor,
+          'font-size': '11',
+          fill: on ? SURFACE.text : SURFACE.body,
+          'font-weight': on ? '600' : '400',
+          opacity: isDim(n) ? 0.35 : 1,
+          children: (on ? '▸ ' : '') + truncated(n),
+        }, prefix + 't' + n),
+      ],
+    }, prefix + n)
+  }
 
   return jsxs('div', {
     children: [
@@ -547,68 +572,14 @@ function Topology({ graph, onHover, onLeave, onPin }) {
                 height: String(Math.max(height, 60)),
                 style: { display: 'block' },
                 children: [
-                  colLabel(PUB_X, 'end', 'publishers'),
+                  colLabel(PUB_DOT, 'end', 'publishers'),
                   colLabel(MID, 'middle', 'topics'),
-                  colLabel(SUB_R, 'end', 'subscribers'),
+                  colLabel(SUB_DOT, 'start', 'subscribers'),
                   ...lines,
-                  ...pubNodes.map((n) => {
-                    const on = focus === n
-                    return jsxs('g', {
-                      onClick: () => setFocus(on ? null : n),
-                      style: { cursor: 'pointer' },
-                      children: [
-                        jsx('circle', {
-                          cx: String(PUB_X + 10),
-                          cy: String(pubY.get(n)),
-                          r: '3.5',
-                          fill: on ? SURFACE.text : SURFACE.muted,
-                        }, 'pnd' + n),
-                        jsx('text', {
-                      x: String(PUB_X),
-                      y: String(pubY.get(n) + 4),
-                      'text-anchor': 'end',
-                      'font-size': '11',
-                      fill: on ? SURFACE.text : SURFACE.body,
-                      'font-weight': on ? '600' : '400',
-                      opacity: isDim(n) ? 0.35 : 1,
-                      onClick: () => setFocus(on ? null : n),
-                      style: { cursor: 'pointer' },
-                      children: (on ? '▸ ' : '') + (n.length > 26 ? n.slice(0, 25) + '…' : n),
-                    }, 'pnt' + n),
-                      ],
-                    }, 'pn' + n)
-                  }),
-                  ...subNodes.map((n) => {
-                    const on = focus === n
-                    return jsxs('g', {
-                      onClick: () => setFocus(on ? null : n),
-                      style: { cursor: 'pointer' },
-                      children: [
-                        jsx('circle', {
-                          cx: String(subDotX.get(n) || SUB_R - 60),
-                          cy: String(subY.get(n)),
-                          r: '3.5',
-                          fill: on ? SURFACE.text : SURFACE.muted,
-                        }, 'snd' + n),
-                        jsx('text', {
-                      x: String(SUB_R),
-                      y: String(subY.get(n) + 4),
-                      'text-anchor': 'end',
-                      'font-size': '11',
-                      fill: on ? SURFACE.text : SURFACE.body,
-                      'font-weight': on ? '600' : '400',
-                      opacity: isDim(n) ? 0.35 : 1,
-                      onClick: () => setFocus(on ? null : n),
-                      style: { cursor: 'pointer' },
-                      children: (on ? '▸ ' : '') + subName(n),
-                    }, 'snt' + n),
-                      ],
-                    }, 'sn' + n)
-                  }),
+                  ...pubNodes.map((n) => nodeRow(n, PUB_TEXT, pubY.get(n), 'end', 'pn')),
+                  ...subNodes.map((n) => nodeRow(n, SUB_TEXT, subY.get(n), 'start', 'sn')),
                   ...topicList.map((t) => {
                     const h = health.get(t)
-                    const r = rates.get(t) || 0
-                    const label = labelFor(t)
                     return jsxs('g', {
                       onMouseEnter: (ev) => onHover && onHover(t, ev),
                       onMouseLeave: () => onLeave && onLeave(),
@@ -616,17 +587,24 @@ function Topology({ graph, onHover, onLeave, onPin }) {
                       style: { cursor: 'pointer' },
                       children: [
                         jsx('circle', {
-                          cx: String(MID - 10),
+                          cx: String(TOPIC_IN),
                           cy: String(topicY.get(t)),
                           r: '3.5',
                           fill: HEALTH_COLOR[h] || '#9aa3b5',
-                        }, 'd' + t),
+                        }, 'din' + t),
+                        jsx('circle', {
+                          cx: String(TOPIC_OUT),
+                          cy: String(topicY.get(t)),
+                          r: '3.5',
+                          fill: HEALTH_COLOR[h] || '#9aa3b5',
+                        }, 'dout' + t),
                         jsx('text', {
-                          x: String(MID - 2),
+                          x: String(MID),
                           y: String(topicY.get(t) + 4),
+                          'text-anchor': 'middle',
                           'font-size': '11',
                           fill: SURFACE.body,
-                          children: label,
+                          children: labelFor(t),
                         }, 't' + t),
                       ],
                     }, 'g' + t)
