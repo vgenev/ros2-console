@@ -58,3 +58,13 @@ config_schema:
       ROS 2, nav2, moveit2 and ros2_control docs are Apache-2.0, BSD-3-Clause and
       CC-BY-4.0 work, so answers quote them with repo and commit instead.
     required: false
+  publish_allow:
+    type: array
+    default: []
+    description: >-
+      Topic globs this install may WRITE to. Empty is the shipped default and it
+      keeps ros2_publish disabled: publishing is the one capability that can move
+      hardware, so it is granted by a human typing a glob, never by a default.
+      Actuation-shaped topics (cmd_vel, joint_*, *_cmd, servo, gripper, motor,
+      throttle, steering, brakes) are refused even when a glob matches.
+    required: false
