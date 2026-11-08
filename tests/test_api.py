@@ -29,6 +29,7 @@ def test_settings_default_to_the_manifest(client, monkeypatch):
         "distro": "jazzy",
         "setup": "",
         "timeout": 15,
+        "publish_allow": [],
         "source": "default",
     }
 
@@ -44,7 +45,7 @@ def test_post_settings_writes_and_returns_saved(client, monkeypatch):
     payload = {"host": "ros2demo", "distro": "jazzy", "setup": "", "timeout": 20}
     response = client.post(f"{PREFIX}/settings", json=payload)
     assert response.status_code == 200
-    assert response.json() == {**payload, "source": "saved"}
+    assert response.json() == {**payload, "publish_allow": [], "source": "saved"}
     assert written == payload
 
 

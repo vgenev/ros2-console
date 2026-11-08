@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import fnmatch
 import json
 import time
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from typing import Any, Callable
 from . import docs as knowledge
 from . import graph as obs
 from .settings import resolve
+from .settings import resolve as settings_resolve
 from .transport import Target
 
 
@@ -194,6 +196,100 @@ def _frame_path(topic: str):
     return frames / f"{slug}-{int(time.time())}.jpg"
 
 
+
+# ------------------------------------------------------------------ publish policy
+
+# Names that move a robot. Refused BEFORE the allowlist is consulted, so a glob
+# cannot be widened into an actuator by accident: an allowlist chooses which
+# topics are writable, it never chooses whether a servo is.
+ACTUATION_PATTERNS = (
+    "cmd_vel", "_cmd", "joint_", "/joint", "emergency", "e_stop", "estop", "kill",
+    "/stop", "stop_", "/servo", "gripper", "motor", "actuator", "throttle",
+    "steer", "brake", "twist", "/drive", "velocity",
+)
+
+MAX_PAYLOAD_BYTES = 8192
+MAX_COUNT = 10
+MIN_RATE, MAX_RATE = 0.5, 5.0
+
+
+def publish_refusal(allow, args: dict) -> str | None:
+    """None when the write is allowed; otherwise why it is not.
+
+    Pure and side-effect free on purpose: every guard is testable without a robot,
+    and none of them can be reached by a caller that skips this function.
+    """
+    topic = (args or {}).get("topic")
+    payload = (args or {}).get("payload")
+    try:
+        topic = obs.validate_topic(topic)
+    except ValueError as exc:
+        return str(exc)
+    if not isinstance(payload, str):
+        return "payload must be a string"
+    if "\x00" in payload:
+        return "payload contains a NUL byte"
+    if len(payload.encode("utf-8")) > MAX_PAYLOAD_BYTES:
+        return f"payload is larger than {MAX_PAYLOAD_BYTES} bytes"
+
+    lowered = topic.lower()
+    for pattern in ACTUATION_PATTERNS:
+        if pattern in lowered:
+            return (
+                f"{topic} matches an actuation pattern ({pattern!r}): this tool writes data "
+                "topics only, and an allowlist entry cannot grant an actuator"
+            )
+
+    count = args.get("count", 1)
+    if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= MAX_COUNT:
+        return f"count must be an integer 1-{MAX_COUNT}"
+    rate = args.get("rate_hz", 1.0)
+    try:
+        rate = float(rate)
+    except (TypeError, ValueError):
+        return "rate_hz must be a number"
+    if not MIN_RATE <= rate <= MAX_RATE:
+        return f"rate_hz must be between {MIN_RATE} and {MAX_RATE}"
+
+    globs = list(allow or [])
+    if not globs:
+        return (
+            "publishing is disabled: publish_allow is empty, so no topic is writable. "
+            "Set publish_allow to the topic globs this install may write (e.g. [\"/demo/*\"]) "
+            "in the plugin settings."
+        )
+    if not any(fnmatch.fnmatchcase(topic, glob) for glob in globs):
+        return (
+            f"{topic} is not covered by publish_allow ({', '.join(globs)}). "
+            "Add a glob for it if this write should be allowed."
+        )
+    return None
+
+
+def _publish(args, ctx=None):
+    """The one write path. Every guard runs before a single byte goes to the robot."""
+    try:
+        target = _target(args, ctx)
+    except ValueError as exc:
+        return json.dumps({"ok": False, "error": str(exc)})
+    refusal = publish_refusal(settings_resolve({}).get("publish_allow"), args)
+    if refusal:
+        return json.dumps({"ok": False, "refused": True, "error": refusal,
+                           "target": target.label})
+    payload, result = obs.publish(
+        target,
+        (args or {}).get("topic"),
+        (args or {}).get("payload"),
+        want_type=(args or {}).get("type") or "",
+        count=int((args or {}).get("count", 1)),
+        rate_hz=float((args or {}).get("rate_hz", 1.0)),
+    )
+    payload["target"] = target.label
+    if not payload.get("ok") and "error" not in payload:
+        payload["error"] = result.error()
+    return json.dumps(payload, default=str)
+
+
 # --------------------------------------------------------------------------- schemas
 
 _TOOLS = [
@@ -346,6 +442,38 @@ _TOOLS = [
                     "limit": {"type": "integer", "description": "How many documents to quote, 1-10 (default 4)."},
                 },
                 "required": ["query"],
+            },
+        },
+    ),    Tool(
+        name="ros2_publish",
+        emoji="📤",
+        handler=_publish,
+        schema={
+            "name": "ros2_publish",
+            "description": (
+                "Publish one message to a ROS 2 topic and PROVE it was received. Disabled by "
+                "default: it refuses unless the topic matches a glob in publish_allow, and it "
+                "refuses any actuation-shaped name (cmd_vel, joint_*, *_cmd, servo, gripper, "
+                "motor, throttle, steering, brakes) even when allowlisted. The message type is "
+                "resolved from the live graph, never supplied by guesswork, and the QoS is "
+                "copied from the topic's existing publisher. Success requires a listener on the "
+                "same QoS to receive the message: a sent message nobody received reports "
+                "ok=false, not a silent success. Payload topics with a simple `data` field "
+                "(e.g. std_msgs/String) only."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "Absolute topic name, e.g. /demo/led/frame."},
+                    "payload": {"type": "string", "description": "The message's data field, verbatim."},
+                    "type": {"type": "string",
+                             "description": "Optional expected type (pkg/msg/Name). If given it must match the graph."},
+                    "count": {"type": "integer", "description": "Messages to send, 1-10 (default 1)."},
+                    "rate_hz": {"type": "number", "description": "Send rate, 0.5-5 Hz (default 1)."},
+                    "host": {"type": "string", "description": "Override the SSH target for this call."},
+                    "distro": {"type": "string", "description": "Override the ROS 2 distro."},
+                },
+                "required": ["topic", "payload"],
             },
         },
     ),

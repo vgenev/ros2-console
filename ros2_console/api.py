@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from . import graph as obs
-from .settings import PLUGIN_ID, resolve, stored
+from .settings import PLUGIN_ID, allowlist, resolve, stored
 from .tools import _graph
 from .transport import Target, validate_destination, validate_distro
 
@@ -35,6 +35,7 @@ def _settings_body(source: str, values: dict | None = None) -> dict:
         "distro": current["distro"],
         "setup": current["setup"],
         "timeout": current["timeout"],
+        "publish_allow": current["publish_allow"],
         "source": source,
     }
 
@@ -75,6 +76,15 @@ def post_settings(body: dict) -> dict:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"key": name, "error": str(exc)}) from exc
     payload = {name: body[name] for name in _FIELDS}
+    # Optional: absent means "leave the allowlist alone", never "grant everything".
+    if "publish_allow" in body:
+        value = body["publish_allow"]
+        if not isinstance(value, (list, str)):
+            raise HTTPException(status_code=400, detail={
+                "key": "publish_allow",
+                "error": "publish_allow must be a list of topic globs (or a comma-separated string)",
+            })
+        payload["publish_allow"] = allowlist(value)
     try:
         write_settings(payload)
     except ValueError as exc:

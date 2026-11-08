@@ -1054,3 +1054,141 @@ def host_status(target: Target) -> tuple[dict, Result]:
         info["error"] = result.error()
     info["seconds"] = round(result.seconds, 2)
     return info, result
+
+
+# -------------------------------------------------------------------- publishing
+
+# The write path. Everything that decides WHETHER it may run lives host-side in
+# tools.publish_refusal(); this body only answers what the robot itself knows —
+# the type, the existing publisher's QoS, and whether a listener saw the message.
+PUBLISH_BODY = r'''
+import sys, time, json
+topic, want_type, payload, count, rate, wait_s = sys.argv[1:7]
+count, rate, wait_s = int(count), float(rate), float(wait_s)
+
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
+
+def qos_of(info):
+    q = info.qos_profile
+    rel = getattr(q.reliability, "name", str(q.reliability))
+    dur = getattr(q.durability, "name", str(q.durability))
+    return ("RELIABLE" if rel == "RELIABLE" else "BEST_EFFORT",
+            "TRANSIENT_LOCAL" if dur == "TRANSIENT_LOCAL" else "VOLATILE")
+
+rclpy.init()
+node = Node("_hermes_publish_probe")
+try:
+    end = time.time() + 3.0
+    types = {}
+    while time.time() < end and topic not in types:
+        rclpy.spin_once(node, timeout_sec=0.2)
+        types = dict(node.get_topic_names_and_types())
+    if topic not in types:
+        print("@@ERR topic is not in the live graph: %s" % topic); raise SystemExit(0)
+    graph_types = types[topic]
+    node_type = graph_types[0]
+    if want_type and want_type != node_type:
+        print("@@ERR type mismatch: the graph says %s, the call asked for %s" % (node_type, want_type))
+        raise SystemExit(0)
+    print("@@TYPE %s" % node_type)
+
+    pub_info = list(node.get_publishers_info_by_topic(topic))
+    if pub_info:
+        rel, dur = qos_of(pub_info[0])
+        print("@@QOS source=existing-publisher reliability=%s durability=%s" % (rel, dur))
+    else:
+        rel, dur = "VOLATILE", "VOLATILE"
+        print("@@QOS source=none-present reliability=%s durability=%s" % (rel, dur))
+
+    qos = QoSProfile(depth=10,
+                     reliability=getattr(ReliabilityPolicy, rel),
+                     durability=getattr(DurabilityPolicy, dur),
+                     history=HistoryPolicy.KEEP_LAST)
+
+    pkg, _, cls_name = node_type.split("/")
+    try:
+        mod = __import__(pkg + ".msg", fromlist=[cls_name])
+        cls = getattr(mod, cls_name)
+    except Exception as exc:
+        print("@@ERR cannot import %s: %s" % (node_type, exc)); raise SystemExit(0)
+    if not hasattr(cls, "data"):
+        print("@@ERR %s carries no simple payload field; this tool writes String-style topics" % node_type)
+        raise SystemExit(0)
+
+    seen = []
+    def on_msg(msg):
+        seen.append(str(getattr(msg, "data", "")))
+
+    node.create_subscription(cls, topic, on_msg, qos)
+    pub = node.create_publisher(cls, topic, qos)
+
+    msg = cls()
+    msg.data = payload
+    sent = 0
+    for i in range(count):
+        pub.publish(msg)
+        sent += 1
+        if i + 1 < count:
+            end = time.time() + (1.0 / rate)
+            while time.time() < end:
+                rclpy.spin_once(node, timeout_sec=0.05)
+    print("@@SENT %d" % sent)
+
+    deadline = time.time() + wait_s
+    while time.time() < deadline and not seen:
+        rclpy.spin_once(node, timeout_sec=0.1)
+    print("@@RECEIVED %d" % (1 if seen else 0))
+    if seen:
+        print("@@ECHO %s" % " ".join(seen[0].split())[:400])
+finally:
+    node.destroy_node()
+    rclpy.shutdown()
+'''
+
+
+def publish(target: Target, topic: str, payload: str, *, want_type: str = "",
+            count: int = 1, rate_hz: float = 1.0, wait_s: float = 3.0) -> tuple[dict, Result]:
+    """Publish to a topic and prove delivery with a listener on the same QoS.
+
+    This function does not decide whether the write is allowed — `tools.publish_refusal`
+    does, before this runs. Everything here answers only what the robot knows.
+    """
+    script = (
+        f"python3 - {shlex.quote(topic)} {shlex.quote(want_type or '')} {shlex.quote(payload)} "
+        f"{int(count)} {float(rate_hz)} {float(wait_s)} <<'HERMES_PUBLISH'\n{PUBLISH_BODY}\nHERMES_PUBLISH"
+    )
+    result = run(target, script, timeout=int(wait_s) + 20, label=f"publish {topic}")
+    stdout = result.stdout or ""
+    if "@@ERR" in stdout:
+        message = stdout.split("@@ERR", 1)[1].strip().splitlines()[0]
+        return {"topic": topic, "ok": False, "published": False, "error": message}, result
+    if "@@RECEIVED" not in stdout:
+        return {
+            "topic": topic,
+            "ok": False,
+            "published": False,
+            "error": (result.error() if not result.ok else "no delivery report returned"),
+        }, result
+
+    meta: dict = {"topic": topic, "payload": payload}
+    for line in stdout.splitlines():
+        if line.startswith("@@TYPE "):
+            meta["type"] = line[len("@@TYPE "):].strip()
+        elif line.startswith("@@QOS "):
+            meta["qos"] = line[len("@@QOS "):].strip()
+        elif line.startswith("@@SENT "):
+            meta["sent"] = int(line[len("@@SENT "):].strip() or 0)
+        elif line.startswith("@@ECHO "):
+            meta["echoed"] = line[len("@@ECHO "):].strip()
+    meta["received"] = stdout.split("@@RECEIVED ", 1)[1].strip().splitlines()[0] == "1"
+    # A publish that no listener saw is a FAILED publish, however clean the send was.
+    meta["ok"] = bool(meta["received"])
+    meta["published"] = bool(meta["received"])
+    if not meta["received"]:
+        meta["hint"] = (
+            "the message was sent but nothing received it within the window: check the topic's "
+            "subscribers, or that the QoS matches theirs"
+        )
+    return meta, result

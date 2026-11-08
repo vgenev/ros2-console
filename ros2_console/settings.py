@@ -20,6 +20,10 @@ DEFAULTS: dict[str, Any] = {
     # Local directory holding a ROS 2 documentation corpus. Empty by design: the
     # upstream docs are third-party licensed, so the plugin never ships them.
     "docs_path": "",
+    # Topic globs the agent may WRITE to. Empty by default and it stays empty
+    # unless a human types a glob: publishing is the one capability that can move
+    # hardware, so it is opt-in per install, never granted by a default.
+    "publish_allow": [],
 }
 
 MIN_TIMEOUT = 5
@@ -71,4 +75,19 @@ def resolve(overrides: dict | None = None) -> dict[str, Any]:
     settings["host"] = str(settings.get("host") or "").strip()
     settings["distro"] = str(settings.get("distro") or "").strip()
     settings["setup"] = str(settings.get("setup") or "").strip()
+    settings["publish_allow"] = allowlist(settings.get("publish_allow"))
     return settings
+
+
+def allowlist(value: Any) -> list[str]:
+    """Globs the agent may publish to. Anything unreadable becomes empty, which
+    denies — a malformed allowlist must never widen access."""
+    if isinstance(value, str):
+        value = [part.strip() for part in value.split(",")]
+    if not isinstance(value, (list, tuple)):
+        return []
+    out = []
+    for item in value:
+        if isinstance(item, str) and item.strip():
+            out.append(item.strip())
+    return out

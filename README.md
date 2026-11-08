@@ -95,6 +95,30 @@ Hovering a topic peeks at its last message; clicking pins the card so you can mo
 the payload, pretty-printed when it is JSON. Frames decode offscreen before swapping in, so a refresh
 never blanks the picture.
 
+## Writing to topics (opt-in)
+
+Six tools read; one can write, and only if you tell it to. `ros2_publish` is **disabled by default** —
+`publish_allow` is an empty list, so every publish refuses until a human adds a topic glob:
+
+```yaml
+plugins:
+  entries:
+    ros2-console:
+      settings:
+        publish_allow: ["/demo/*"]
+```
+
+Six guards stand between a call and the robot:
+
+1. **Allowlist.** The topic must match a glob in `publish_allow`. Empty list = nothing is writable, and the refusal names the setting.
+2. **Actuation is refused regardless.** `cmd_vel`, `joint_*`, `*_cmd`, `servo`, `gripper`, `motor`, `throttle`, steering, brakes and similar names are refused **even if a glob would allow them** — an allowlist chooses which topics are writable, never whether a servo is.
+3. **Type from the graph, never from the caller.** The message type is read from the live graph. A type you pass must match it, or the call is refused.
+4. **Bounds.** 1–10 messages, 0.5–5 Hz, payload ≤ 8 KB, simple `data`-field message types only.
+5. **QoS copied from the topic's existing publisher.** A RELIABLE publisher against a BEST_EFFORT subscriber delivers nothing silently, so the QoS is inherited rather than assumed, and the choice is reported.
+6. **Delivery is proven.** A listener on the same QoS must receive the message within the window. `sent but nobody received it` reports `ok: false` — a clean send is not a success.
+
+The tool publishes and reports; it does not stream. Every call is bounded.
+
 ## Safety
 
 The plugin runs: `ros2 node list`, `ros2 topic list`, `ros2 topic info`, `ros2 topic hz`, one `rclpy`

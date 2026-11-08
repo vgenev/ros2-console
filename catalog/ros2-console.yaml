@@ -16,3 +16,4 @@ capabilities:
     - ros2_topic_sample
     - ros2_camera_snapshot
     - ros2_docs
+    - ros2_publish

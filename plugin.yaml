@@ -19,6 +19,7 @@ provides_tools:
   - ros2_topic_sample
   - ros2_camera_snapshot
   - ros2_docs
+  - ros2_publish
 provides_hooks: []
 provides_middleware: []
 requires_env: []
