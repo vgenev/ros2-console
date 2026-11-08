@@ -438,10 +438,13 @@ function Topology({ graph, onHover, onLeave, onPin }) {
     const r = rates.get(t) || 0
     return base + '  ' + (r ? r.toFixed(1) + '/s' : 'no traffic')
   }
-  // Anchor every subscriber-side edge past the WIDEST label on screen: a per-topic
-  // estimate is one wide glyph away from crossing the text it was meant to clear.
-  const widest = topicList.reduce((m, t) => Math.max(m, labelFor(t).length), 0)
-  const subAnchorX = Math.round(MID - 2 + widest * 6.4 + 16)
+  // Each subscriber-side edge starts just past ITS OWN label. Anchoring them all
+  // past the widest label on screen leaves a dead band beside every short name.
+  // 6.9 px/char is deliberately generous: landing short means a line through the
+  // text, landing long costs a few pixels of gap.
+  const subAnchor = new Map(
+    topicList.map((t) => [t, Math.round(MID - 2 + labelFor(t).length * 6.9 + 12)])
+  )
 
   // A curve shows a connection; an arrow shows which way it flows. Both hops run
   // left to right, so the head is a plain triangle at the end point.
@@ -497,7 +500,7 @@ function Topology({ graph, onHover, onLeave, onPin }) {
     const y1 = topicY.get(e.topic)
     const y2 = subY.get(e.node)
     if (y1 == null || y2 == null) return
-    lines.push(seg(subAnchorX, subDotX.get(e.node) || SUB_R - 60, y1, y2, e.topic, e, 's' + i))
+    lines.push(seg(subAnchor.get(e.topic) || MID + 40, subDotX.get(e.node) || SUB_R - 60, y1, y2, e.topic, e, 's' + i))
   })
 
   const activeBits = []
