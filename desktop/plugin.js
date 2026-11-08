@@ -422,9 +422,9 @@ function Topology({ graph, onHover, onLeave, onPin }) {
   // The glyph estimate is generous on purpose: landing short draws a line through
   // text, landing long costs a few pixels of air.
   const rowH = 26
-  const W = 1120
+  const W = 1180
   const MID = Math.round(W / 2)
-  const GAP = 56
+  const GAP = 104
   const CH = 6.9
   const maxHalf = Math.ceil(
     topicList.reduce((m, t) => Math.max(m, labelFor(t).length), 0) * CH / 2
