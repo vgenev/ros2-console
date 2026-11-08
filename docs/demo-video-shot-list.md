@@ -1,82 +1,87 @@
-# Demo video — shot list
+# Demo video — shot list, narration, subtitles
 
-A short recording (under 90 s) for the submission post. This file keeps only the
-shot list, the argument it makes, and the production notes. It replaces the
-internal planning notes that used to live in `docs/plans/`, which described a
-private engagement and do not belong in a public repo.
+A recording under 90 s for the submission post: the argument it makes, the beats,
+the spoken lines and the burned-in captions. Filmed against a live board over SSH.
 
-## The one argument
+## The one argument (post + end card)
 
 > **Your robot is talking. Hermes tells you who's listening.**
 
-Then, under it in the post:
+Subline, in the post:
 
-> Hermes connects to a live robot and shows you what's actually flowing — and
-> what isn't.
+> Hermes connects to a live robot and shows you what's actually flowing — and what
+> isn't. Every number on screen is measured, and says how.
 
-Everything that does not serve that sentence is cut. Nothing in the video claims
-anything about other tools; the subject is what this one can see, and how you can
-check it.
+Nothing in the video claims anything about other tools. We never measured other
+software, so it does not get characterised.
 
-## Why that argument
+## The register
 
-| Naive reading | What the tool says | Evidence on screen |
-|---|---|---|
-| `/session/status` 1 pub / 0 sub → dead output | `state` — latched, value retained | hover returns `{"session": "demo", "state": "armed"}` with no publisher traffic |
-| `/chatter` 1/1 → "connected, so it works" | `live` at a **measured** rate | dashes move at a rate that matches the number |
-| `/depth/points/compressed` 0 pubs / 4 subs | `dead_input` | subscribers waiting on nothing |
-| `/board/temperature` 1 pub / 0 sub, VOLATILE | `dead_output` | data flowing into a bin |
+A person who has spent time with a robot, describing what they can now see.
+Competence, not enthusiasm; understatement over superlative. No "seamless",
+"supercharge", "empower", "unlock". Every claim is visible in the 86 seconds.
 
-The last two rows are there because knowing a robot intimately means knowing what
-is broken about it too: the tool reports the real orphans instead of presenting a
-clean picture.
+## The filming target
 
-## Shot list
+A live board over SSH, its real graph, nothing staged. This file deliberately does
+not name the topics that appear on screen: the shot list is public, the robot's
+namespace is not. Each beat describes its topic by what it proves, so the recording
+can follow the real graph without this document carrying the names.
 
-| # | Time | On screen | Action | Burned-in caption |
-|---|---|---|---|---|
-| 1 | 0:00–0:06 | desktop app, ROS 2 pane, topology already drawn | still frame, no motion | "A latched topic. 1 publisher. 0 subscribers." |
-| 2 | 0:06–0:09 | same | cursor moves to the `session/status` node | "Nobody listening — and it is still holding a message." |
-| 3 | 0:09–0:16 | pane | click **Refresh** — topology redraws | "One call reads the whole graph" |
-| 4 | 0:16–0:28 | pane | hover `/session/status`, then **click to pin**; the card shows the retained JSON | "Retained value, replayed. TRANSIENT_LOCAL → `state`, not `orphan`." |
-| 5 | 0:28–0:36 | pane | hover `/chatter`; dashes speed up; card shows a String sample | "Motion is the measured rate, not an assumption" |
-| 6 | 0:36–0:44 | pane | hover `/depth/points/compressed` then `/board/temperature` | "0 publishers, 4 subscribers. Real orphans — it says so." |
-| 7 | 0:44–0:56 | pane | **Grab frame** → JPEG appears | "One call: a JPEG. A raw Image is decoded on the robot." |
-| 8 | 0:56–1:10 | chat | ask `ros2_docs`: why does transient-local durability matter? → answer cites repo and commit | "Answers carry the repo and commit they came from." |
-| 9 | 1:10–1:24 | end card | plugin name, tool count, install line | "Your robot is talking. Hermes tells you who's listening." |
+The pane is left unfiltered, or filtered only if the graph is too dense to read at
+phone size — either way the view is declared on screen, not fabricated.
 
-If it runs long, cut beat 6 to 4 s and beat 8 to 10 s. Never cut beat 4 — it is the
-entire submission.
+## Beats
 
-## Ground truth
+| # | Time | On screen | Action | Burned-in caption | Narration |
+|---|---|---|---|---|---|
+| 1 | 0:00–0:06 | pane, topology already drawn | still | "A live robot, read by the agent" | "This is a live robot. Nothing in this window was drawn by hand." |
+| 2 | 0:06–0:13 | a topic with one publisher, no subscribers, latched | hover it | "One publisher. Nobody listening. It still holds a value." | "One publisher, nobody listening — and it still holds its last message." |
+| 3 | 0:13–0:21 | pane | click **Refresh** | "One call, the whole graph" | "One call reads the whole graph." |
+| 4 | 0:21–0:31 | a live topic, metrics strip, evidence column | hover, let the rate settle | "Counted, not guessed — 10.5/s over 2 s" | "The rate isn't an assumption. It's counted, and it says over what window." |
+| 5 | 0:31–0:40 | one `dead_input` and one `dead_output` topic | hover both | "These two are actually broken" | "These two are broken, and it says so instead of showing a clean picture." |
+| 6 | 0:40–0:50 | **Grab frame** → JPEG | click, wait for the frame | "One call, one frame" | "One call gives me a frame, decoded on the robot." |
+| 7 | 0:50–0:58 | publish row, an actuation-shaped topic | type, send, refusal appears | "Write path: off by default. Actuators stay off." | "Writing is off by default — and an actuator stays off even when it isn't." |
+| 8 | 0:58–1:10 | publish row, a display topic | send → `received · 1 sent · echo …` | "Sent isn't success. Received is." | "When it does write, something has to receive it. Sent isn't success." |
+| 9 | 1:10–1:19 | LED panel B-roll, phone | cut to panel, art visible | "Same tool, a display that was never a dashboard" | "Same tool, on a display nobody designed as a dashboard." |
+| 10 | 1:19–1:26 | end card | hold 6 s | "Your robot is talking. Hermes tells you who's listening." | (silence) |
 
-Every number on screen is measured, not remembered. Before recording, re-run the
-graph read, the rate measurements and the camera snapshot against the demo cell
-and read the values back from the tool; do not re-type them from this file.
+86 s. If it runs long, cut beat 9. **Never cut beats 7–8** — a refusal plus a delivery
+proof is what no other entry will show.
+
+## Subtitle rules
+
+- The caption column above is the subtitle text, near-verbatim.
+- One line, ≤ 45 characters, lower third, 4 % margin.
+- Sentence case, no exclamation marks, no drop shadow over dense areas.
+- Burned in: the feed autoplays muted, and the subtitles must stand alone.
 
 ## Pre-flight
 
-1. `hermes gateway restart` so the pane runs the current build.
-2. Reload desktop plugins, open the ROS 2 pane once, confirm the orphan count.
-3. Start the demo nodes in the demo container (see `demo/README.md`).
-4. Wait, then confirm the expected topics exist.
-5. Turn on Do Not Disturb. Close every window that shows a path, token, IP or
-   another project's name.
-6. Terminal and app font at **≥15 px**; the video is watched on a phone.
-7. Record at 2560×1440, 30 fps, cursor visible.
+1. `hermes gateway restart`, then quit and reopen the desktop app.
+2. Pane host = the board over SSH; filter off; `allow` set to the topic used in beat 8.
+3. Confirm the graph has at least one latched topic with no subscribers, one live topic,
+   and one orphan of each kind — beats 2, 4 and 5 depend on it.
+4. Confirm the actuation-shaped name is refused and the display topic returns `received`.
+5. Do Not Disturb on. Close every window showing a path, a token, or a customer name.
+6. Font ≥ 15 px, window 2560×1440, 30 fps, cursor visible.
+7. Record **no microphone** — narration is added in the edit.
 
-## Editing rules
+## Editing (done by the agent, not the operator)
 
-- The graph read gets a visible **2× speed badge** with the real number on screen.
-  Do not hide the wait — a judge who has run ROS 2 knows introspection is slow, and
-  faking speed is the one unforgivable edit.
-- Burn in captions: the feed autoplays muted.
-- No music. Narration is optional; if used, keep it under 40 words.
-- End card holds 6 s so it can be screenshotted as a thumbnail.
+1. VO generated per beat, placed at each beat's start.
+2. Captions burned from the same table, timed to the VO.
+3. The graph-read wait stays at real speed with a `2×` badge and the measured seconds
+   on screen — a judge who has run ROS 2 knows introspection is slow, and faking
+   speed is the one unforgivable edit.
+4. No music under the narration.
+5. End card holds 6 s and is exported again as the post thumbnail.
+6. Delivery: `ros2-console-demo.mp4`, H.264, 1080p, under 90 s, captions burned.
 
 ## Deliverables
 
-- `ros2-console-demo.mp4` — under 90 s, 1080p, captions burned in
+- raw screen capture from the operator, 1440p
+- `ros2-console-demo.mp4` from the agent — under 90 s, 1080p, VO + captions
 - end-card still for the post thumbnail
-- the post text, tagged @NousResearch
+- the post text, tagging @NousResearch
 - catalog entry with a real `sha` (requires the public push — separate approval)

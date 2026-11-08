@@ -20,6 +20,7 @@ hermes plugins install OWNER/ros2-console
 - `ros2_topic_sample` reads one message. It subscribes with the publisher's own QoS, so `BEST_EFFORT` camera topics work; `String` payloads come back whole (JSON is not wrapped in a Python `repr`), and image topics are summarised by size and encoding instead of dumping a pixel array.
 - `ros2_camera_snapshot` saves one frame as a JPEG on the machine running Hermes. `sensor_msgs/CompressedImage` passes through; a raw `sensor_msgs/Image` is decoded on the robot when numpy and PIL are present.
 - `ros2_docs` answers architecture questions from a local documentation corpus you point it at (see **Knowledge layer**).
+- `ros2_publish` writes one message and proves delivery, and is **disabled until you allow a topic** (see **Writing to topics**).
 
 ## Settings
 
@@ -81,12 +82,15 @@ space or follow you into other chats. The header shows the target, the distro, a
 polling, and the time of the last read. The target field saves the plugin's `host` setting, so a
 fresh install needs no config editing.
 
-**Topology** draws nodes on the left and topics on the right, with solid lines for publishers and
-dashed for subscribers. A line carries moving dashes **only when that topic is actually publishing**,
+**Topology** draws three lanes — publishers on the left, topics in the middle, subscribers on the
+right — so direction is readable at a glance. A node that both publishes and subscribes appears in
+both columns. Edges are solid where a publisher feeds a topic and dashed where a topic feeds a
+subscriber, and each topic carries a dot on both sides: the port publishers arrive at and the port
+subscribers leave from. A line carries moving dashes **only when that topic is actually publishing**,
 and the dash speed follows the measured `msg/s` — motion is evidence, not decoration. **Table** shows
 the same data as rows. A legend spells out all six states and the line grammar.
 
-**Poll** repeats the read every 15 s (a read costs 11–12 s on real hardware, so faster polling only
+**Poll** repeats the read every 60 s (a read costs 11–18 s on real hardware, so faster polling only
 queues work), and it is **on while the page is open**: opening the page starts it and leaving stops
 it, so nothing reads a robot in the background. The Poll button turns it off and on. While polling,
 the camera re-grabs every 8 s.
@@ -94,6 +98,10 @@ the camera re-grabs every 8 s.
 Hovering a topic peeks at its last message; clicking pins the card so you can move into it and copy
 the payload, pretty-printed when it is JSON. Frames decode offscreen before swapping in, so a refresh
 never blanks the picture.
+
+Below the camera, a **Publish (write path)** row edits `publish_allow` and, once the list is non-empty,
+sends a topic and payload and prints the delivery proof — `received · 1 sent · type · echo …` — or the
+refusal. It calls the same guard function as the agent, so the pane is not a privileged path.
 
 ## Writing to topics (opt-in)
 
