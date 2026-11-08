@@ -1095,11 +1095,18 @@ try:
     print("@@TYPE %s" % node_type)
 
     pub_info = list(node.get_publishers_info_by_topic(topic))
+    sub_info = list(node.get_subscriptions_info_by_topic(topic))
     if pub_info:
         rel, dur = qos_of(pub_info[0])
         print("@@QOS source=existing-publisher reliability=%s durability=%s" % (rel, dur))
+    elif sub_info:
+        # No publisher to copy: match the CONSUMER instead. A RELIABLE publisher
+        # against a BEST_EFFORT subscriber delivers nothing, and the reverse is
+        # just as silent, so the listener's policy decides ours.
+        rel, dur = qos_of(sub_info[0])
+        print("@@QOS source=existing-subscriber reliability=%s durability=%s" % (rel, dur))
     else:
-        rel, dur = "VOLATILE", "VOLATILE"
+        rel, dur = "RELIABLE", "VOLATILE"
         print("@@QOS source=none-present reliability=%s durability=%s" % (rel, dur))
 
     qos = QoSProfile(depth=10,
