@@ -145,16 +145,16 @@ SSH runs with `BatchMode=yes`. Authentication is your SSH config and agent. The 
 
 ## Reach the robot
 
-Put the robot in your SSH config before you set `host` to that name. The demo in this repo uses the host `ros2demo`.
+Put the robot in your SSH config before you set `host` to that name — an alias keeps the address
+and the key out of the plugin's settings.
 
 ```
-Host ros2demo
-  HostName 127.0.0.1
-  Port 2222
-  User root
+Host robot
+  HostName robot.local
+  User your-user
 ```
 
-`ssh -o BatchMode=yes ros2demo` has to succeed with no prompt. If a password would have been required, the command fails in about six seconds.
+`ssh -o BatchMode=yes robot` has to succeed with no prompt. If a password would have been required, the command fails in about six seconds.
 
 `host` is checked against an allow-list before ssh runs: a hostname, IPv4 address, ssh_config alias or `user@host`. Anything else — including a value that starts with `-`, which ssh would read as an option — is refused, so a hostile `host` from a tool call, a settings POST or `/graph?host=` never becomes an argv.
 

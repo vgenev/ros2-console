@@ -38,7 +38,7 @@ phone size — either way the view is declared on screen, not fabricated.
 | 1 | 0:00–0:05 | pane, topology already drawn | still | "A live robot, read by the agent" | "This is a live robot. Nothing in this window was drawn by hand." |
 | 2 | 0:05–0:11 | a topic with one publisher, no subscribers, latched | hover it | "One publisher. Nobody listening. It still holds a value." | "One publisher, nobody listening — and it still holds its last message." |
 | 3 | 0:11–0:18 | pane | click **Refresh** | "One call, the whole graph" | "One call reads the whole graph." |
-| 4 | 0:18–0:26 | a live topic, metrics strip, evidence column | hover, let the rate settle | "Counted, not guessed — 10.5/s over 2 s" | "The rate isn't an assumption. It's counted, and it says over what window." |
+| 4 | 0:18–0:26 | a live topic, metrics strip, evidence column | hover, let the rate settle | "Counted, not guessed — the rate and its window" | "The rate isn't an assumption. It's counted, and it says over what window." |
 | 5 | 0:26–0:33 | one `dead_input` and one `dead_output` topic | hover both | "These two are actually broken" | "These two are broken, and it says so instead of showing a clean picture." |
 | 6 | 0:33–0:41 | **Grab frame** → JPEG | click, wait for the frame | "One call, one frame" | "One call gives me a frame, decoded on the robot." |
 | 7 | 0:41–0:49 | publish row, an actuation-shaped topic | type, send, refusal appears | "Write path: off by default. Actuators stay off." | "Writing is off by default — and an actuator stays off even when it isn't." |
