@@ -1275,6 +1275,17 @@ function Pane({ ctx, bus }) {
                 spellCheck: false,
                 style: { width: '100%', boxSizing: 'border-box', marginBottom: '6px' },
               }),
+              // A truncated paste looks identical to a good one, and the consumer
+              // silently ignores a payload of the wrong length. Show the count.
+              jsx('div', {
+                style: {
+                  marginBottom: '6px',
+                  fontFamily: 'ui-monospace, monospace',
+                  fontSize: '11px',
+                  color: 'var(--ui-text-tertiary)',
+                },
+                children: pubPayload.length + ' chars · ' + pubPayload.replace(/[^0-9a-fA-F]/g, '').length + ' hex',
+              }),
               jsx('button', {
                 type: 'button',
                 disabled: pubBusy || !pubTopic || !pubPayload,
@@ -1296,7 +1307,8 @@ function Pane({ ctx, bus }) {
                 ? jsx('p', {
                     style: { marginTop: '6px', fontFamily: 'ui-monospace, monospace', color: pubResult.ok ? '#6ee7b7' : '#f0a5a5' },
                     children: pubResult.ok
-                      ? 'received · ' + String(pubResult.sent || 1) + ' sent · ' + String(pubResult.type || '') + ' · echo ' + String(pubResult.echoed || '')
+                      ? 'received · ' + String(pubResult.sent || 1) + ' sent · ' + String(pubResult.type || '') +
+                        ' · ' + String((pubResult.echoed || '').length) + ' chars echoed'
                       : 'refused/failed · ' + String(pubResult.error || 'no reason reported'),
                   })
                 : null,
