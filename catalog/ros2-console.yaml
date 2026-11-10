@@ -1,9 +1,10 @@
 name: ros2-console
-repo: https://github.com/OWNER/ros2-console
+repo: https://github.com/vgenev/ros2-console
 # SHA_PENDING until the first public push, then a 40-hex digest that is not all zeros.
 sha: SHA_PENDING
-description: "Read a live ROS 2 graph over SSH: topic health, measured rate, one message, camera frame, plus architecture answers from your own docs corpus with repo/commit provenance."
+description: "Read a live ROS 2 graph over SSH: topic health, measured rate, one message, camera frame, doc answers with commit provenance, and one gated publish that proves delivery."
 maintainer: vgenev
+title: ROS 2 Console
 tier: community
 category: tools
 requires_hermes: ">=0.22.0"
@@ -17,3 +18,9 @@ capabilities:
     - ros2_camera_snapshot
     - ros2_docs
     - ros2_publish
+image: https://raw.githubusercontent.com/vgenev/ros2-console/SHA_PENDING/docs/assets/hermes-plate.jpg
+screenshots:
+  - https://raw.githubusercontent.com/vgenev/ros2-console/SHA_PENDING/docs/assets/pane-topology.png
+  - https://raw.githubusercontent.com/vgenev/ros2-console/SHA_PENDING/docs/assets/pane-table.png
+  - https://raw.githubusercontent.com/vgenev/ros2-console/SHA_PENDING/docs/assets/pane-publish.png
+known_issues: "Needs a reachable ROS 2 host over SSH. Publishing is deny-by-default: it stays off until you put a topic glob in publish_allow."
