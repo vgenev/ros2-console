@@ -185,3 +185,35 @@ def test_sample_route_names_an_idle_topic_instead_of_failing(client, monkeypatch
     assert body["ok"] is True
     assert body["received"] is False
     assert body["hint"] == "nothing arrived in the window"
+
+
+class _FakeCtx:
+    """Stand-in for the plugin context: records what a backend write would persist."""
+
+    def __init__(self):
+        self.written = {}
+
+    def set_config(self, key, value):
+        self.written[key] = value
+
+
+def test_write_settings_goes_through_the_plugin_context(monkeypatch):
+    from ros2_console import runtime
+    from ros2_console.api import write_settings
+
+    ctx = _FakeCtx()
+    monkeypatch.setattr(runtime, "_CTX", ctx)
+    write_settings({"host": "robot.local", "timeout": 20})
+    assert ctx.written == {"host": "robot.local", "timeout": 20}
+
+
+def test_write_settings_without_a_context_is_a_503(client, monkeypatch):
+    """No context means no honest write, so the route must refuse instead of lying."""
+    from ros2_console import runtime
+
+    monkeypatch.setattr(runtime, "_CTX", None)
+    response = client.post(
+        f"{PREFIX}/settings",
+        json={"host": "robot.local", "distro": "jazzy", "setup": "", "timeout": 20},
+    )
+    assert response.status_code == 503

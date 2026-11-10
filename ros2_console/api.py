@@ -12,7 +12,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from . import graph as obs
-from .settings import PLUGIN_ID, allowlist, resolve, stored
+from .runtime import save_setting
+from .settings import allowlist, resolve, stored
 from .tools import _graph, _publish
 from .transport import Target, validate_destination, validate_distro
 
@@ -22,10 +23,12 @@ _FIELDS = ("host", "distro", "setup", "timeout")
 
 
 def write_settings(values: dict) -> None:
-    from hermes_cli.plugins_settings import save_plugin_settings
-
-    root = Path(__file__).resolve().parents[1]
-    save_plugin_settings(PLUGIN_ID, root, values)
+    """Persist through the public plugin context (catalog rule 9: no core imports)."""
+    try:
+        for key, value in values.items():
+            save_setting(key, value)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 def _settings_body(source: str, values: dict | None = None) -> dict:

@@ -17,7 +17,10 @@ TOOLSET = "ros2"
 
 
 def register(ctx):
-    from .ros2_console import tools
+    from .ros2_console import runtime, tools
+
+    # backend routes persist settings through ctx.set_config; keep it reachable
+    runtime.set_ctx(ctx)
 
     for tool in tools.TOOLS:
         ctx.register_tool(
