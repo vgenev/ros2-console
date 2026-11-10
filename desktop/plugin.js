@@ -11,6 +11,8 @@ const DEFAULT_TOPIC = '/camera/image_raw/compressed'
 // timeout on the failure path. One read a minute is 27% duty on a diagnostic pane
 // nobody is timing, and the traffic window it reports is 2s regardless.
 const POLL_MS = 60000
+// Derived, never typed twice: the toggle label used to say 15s while the timer ran 60s.
+const POLL_LABEL = `Polling every ${Math.round(POLL_MS / 1000)}s`
 
 // Animation cycles are quantised: a small rate change between polls would
 // otherwise produce a new dur value, restart the SMIL animation, and read as a
@@ -1176,7 +1178,7 @@ function Pane({ ctx, bus }) {
               setPolling(next)
               bus.setPolling(next)
             },
-            children: polling ? 'Polling every 15s' : 'Poll',
+            children: polling ? POLL_LABEL : 'Poll',
           }),
           jsx('button', {
             type: 'button',
